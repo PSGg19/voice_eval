@@ -1,0 +1,37 @@
+name: "IVR Appointment Booking"
+target: "+1234567890"  # replace with your bot's phone number
+
+steps:
+  # Step 0: Bot greets with IVR menu
+  - expect:
+      contains_any: ["press 1", "press one", "appointments", "press 2", "press two"]
+    dtmf: "1"  # press 1 for appointments
+
+  # Step 1: Bot asks for department
+  - expect:
+      contains_any: ["department", "press 1", "press 2", "general", "specialist"]
+    dtmf: "2"  # press 2 for specialist
+
+  # Step 2: Bot confirms selection, asks to speak
+  - expect:
+      contains_any: ["specialist", "transferred", "next available", "name"]
+    say: "John Smith"
+
+  # Step 3: Bot asks for date preference
+  - expect:
+      contains_any: ["date", "when", "prefer", "available"]
+    say: "Next Tuesday at 2pm please"
+
+  # Step 4: Bot confirms booking, press 1 to confirm
+  - expect:
+      contains_any: ["confirm", "tuesday", "2 pm", "press 1"]
+    dtmf: "1"
+
+  # Step 5: Bot gives confirmation number
+  - expect:
+      contains_any: ["confirmed", "confirmation", "number", "booked"]
+    say: "Thank you, goodbye"
+
+success_criteria:
+  all_steps_passed: true
+  max_latency_ms: 5000

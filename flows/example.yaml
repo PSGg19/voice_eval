@@ -1,0 +1,21 @@
+name: "Penn Credit Auth Check"
+target: "+15513455447"
+
+steps:
+  # Step 0: Bot greets and asks for reference ID
+  - expect:
+      contains_any: ["thank you for calling", "Penn Credit", "reference"]
+    say: "My reference ID is 1 2 3 4 5 6"
+
+  # Step 1: Bot authenticates and asks next question or provides info
+  - expect:
+      contains_any: ["authenticate", "verify", "confirm", "provide", "help"]
+    say: "That's all I needed. Thank you, goodbye."
+
+  # Step 2: Bot says farewell
+  - expect:
+      contains_any: ["goodbye", "bye", "anything else", "thank", "help"]
+
+success_criteria:
+  all_steps_passed: true
+  max_latency_ms: 5000
