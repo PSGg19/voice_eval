@@ -13,7 +13,8 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Settings
-from .models import CallResult, StepStatus
+from .load import LoadTestRunner
+from .models import CallResult, LoadTestConfig, LoadTestResult, StepStatus
 from .runner import TestRunner, load_flow
 from .server import app as fastapi_app
 from .store import ResultStore
@@ -125,6 +126,114 @@ def run(
 
     result = asyncio.run(_run())
     raise typer.Exit(code=0 if result.passed else 1)
+
+
+def _print_load_result(result: LoadTestResult):
+    """Pretty-print a load test result."""
+    all_passed = result.passed_calls == result.total_calls
+    color = "green" if all_passed else "red"
+
+    console.print()
+    console.print(f"[bold]Load Test: {result.flow_name}[/] → {result.target}")
+    console.print(
+        f"  Config: {result.config.calls} calls at {result.config.cps} CPS"
+    )
+    if result.total_duration_ms:
+        console.print(f"  Total time: {result.total_duration_ms / 1000:.1f}s")
+    console.print()
+
+    # Summary
+    summary = Table(show_header=True, padding=(0, 2), title="Summary")
+    summary.add_column("Metric", style="bold")
+    summary.add_column("Value")
+    summary.add_row("Total calls", str(result.total_calls))
+    summary.add_row("Passed", f"[green]{result.passed_calls}[/]")
+    summary.add_row("Failed", f"[red]{result.failed_calls}[/]" if result.failed_calls else "0")
+    summary.add_row("Errors", f"[red]{result.error_calls}[/]" if result.error_calls else "0")
+    summary.add_row("Pass rate", f"[{color}]{result.pass_rate:.1f}%[/]")
+    console.print(summary)
+    console.print()
+
+    # Duration stats
+    if result.avg_duration_ms > 0:
+        dur = Table(show_header=True, padding=(0, 2), title="Call Duration")
+        dur.add_column("Metric", style="bold")
+        dur.add_column("Value")
+        dur.add_row("Avg", f"{result.avg_duration_ms:.0f}ms")
+        dur.add_row("Min", f"{result.min_duration_ms:.0f}ms")
+        dur.add_row("Max", f"{result.max_duration_ms:.0f}ms")
+        dur.add_row("P50", f"{result.p50_duration_ms:.0f}ms")
+        dur.add_row("P95", f"{result.p95_duration_ms:.0f}ms")
+        console.print(dur)
+        console.print()
+
+    # Per-call breakdown
+    if result.call_results:
+        calls_table = Table(show_header=True, padding=(0, 1), title="Per-Call Results")
+        calls_table.add_column("#", style="dim", width=4)
+        calls_table.add_column("ID", style="dim", width=12)
+        calls_table.add_column("Status", width=10)
+        calls_table.add_column("Passed", width=7)
+        calls_table.add_column("Duration", width=10)
+        calls_table.add_column("Error", max_width=40)
+
+        for i, cr in enumerate(result.call_results):
+            passed = cr.passed
+            style = "green" if passed else "red"
+            duration = f"{cr.duration_ms:.0f}ms" if cr.duration_ms else "-"
+            table_error = (cr.error or "")[:40]
+            calls_table.add_row(
+                str(i + 1),
+                cr.id,
+                f"[{style}]{cr.status.value}[/]",
+                f"[{style}]{'yes' if passed else 'no'}[/]",
+                duration,
+                f"[red]{table_error}[/]" if table_error else "",
+            )
+        console.print(calls_table)
+
+    console.print()
+
+
+@cli_app.command()
+def load(
+    flow_path: str = typer.Argument(..., help="Path to flow YAML file"),
+    calls: int = typer.Option(10, "--calls", "-c", help="Total number of calls"),
+    cps: float = typer.Option(1.0, "--cps", help="Calls per second launch rate"),
+    max_concurrent: int = typer.Option(0, "--max-concurrent", "-m", help="Max simultaneous calls (0=no limit)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Run a load test — multiple concurrent calls against your bot."""
+    _setup_logging(verbose)
+    settings = Settings()
+
+    _start_server(settings)
+    runner = TestRunner(settings)
+    config = LoadTestConfig(calls=calls, cps=cps, max_concurrent=max_concurrent)
+    load_runner = LoadTestRunner(runner, config)
+
+    def on_progress(completed: int, total: int, cr: CallResult):
+        status = "[green]PASS[/]" if cr.passed else "[red]FAIL[/]"
+        console.print(f"  [{completed}/{total}] {status} {cr.id} ({cr.duration_ms:.0f}ms)" if cr.duration_ms else f"  [{completed}/{total}] {status} {cr.id}")
+
+    async def _load():
+        flow = load_flow(flow_path)
+        console.print(f"\n[bold]Starting load test:[/] {calls} calls at {cps} CPS → {flow.target}")
+        try:
+            result = await load_runner.run(flow, on_call_complete=on_progress)
+            _print_load_result(result)
+
+            # Persist
+            store = ResultStore(settings.db_path)
+            await store.save_load_result(result)
+
+            return result
+        finally:
+            await runner.close()
+
+    result = asyncio.run(_load())
+    all_passed = result.passed_calls == result.total_calls
+    raise typer.Exit(code=0 if all_passed else 1)
 
 
 @cli_app.command()

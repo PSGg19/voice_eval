@@ -88,6 +88,14 @@ class TestRunner:
         if result.status == CallStatus.IN_PROGRESS:
             result.finish(CallStatus.COMPLETED)
 
+        # Save audio recordings
+        try:
+            paths = stream_session.save_recording("recordings")
+            if paths:
+                result.recording_paths = paths
+        except Exception as exc:
+            logger.warning("Failed to save recording: %s", exc)
+
         # Persist
         await self.store.save_result(result)
 

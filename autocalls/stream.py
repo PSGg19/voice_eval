@@ -10,7 +10,10 @@ import asyncio
 import base64
 import json
 import logging
+import struct
 import time
+import wave
+from pathlib import Path
 from typing import Optional
 
 from starlette.websockets import WebSocket
@@ -51,6 +54,10 @@ class MediaStreamSession:
         self._last_audio_time: float = 0
         self._speech_started: bool = False
         self._we_are_speaking: bool = False
+
+        # Audio recording
+        self._bot_audio_buffer: bytearray = bytearray()
+        self._our_audio_buffer: bytearray = bytearray()
 
         # STT
         self._bot_text_finalized: asyncio.Event = asyncio.Event()
@@ -134,6 +141,7 @@ class MediaStreamSession:
 
                 elif event == "media":
                     audio = base64.b64decode(data["media"]["payload"])
+                    self._bot_audio_buffer.extend(audio)
                     await self._stt.send_audio(audio)
                     self._last_audio_time = time.time()
 
@@ -239,6 +247,7 @@ class MediaStreamSession:
             if len(chunk) < CHUNK_SIZE:
                 chunk += MULAW_SILENCE * (CHUNK_SIZE - len(chunk))
 
+            self._our_audio_buffer.extend(chunk)
             payload = base64.b64encode(chunk).decode("ascii")
             msg = json.dumps(
                 {
@@ -274,3 +283,49 @@ class MediaStreamSession:
     @property
     def elapsed_ms(self) -> float:
         return (time.time() - self._start_time) * 1000
+
+    def save_recording(self, directory: str | Path) -> dict[str, str]:
+        """Save bot and caller audio as WAV files. Returns paths."""
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        paths = {}
+        session_id = self.result.id
+
+        if self._bot_audio_buffer:
+            bot_path = directory / f"{session_id}_bot.wav"
+            _mulaw_to_wav(bytes(self._bot_audio_buffer), str(bot_path))
+            paths["bot"] = str(bot_path)
+            logger.info("Saved bot audio: %s (%d bytes)", bot_path, len(self._bot_audio_buffer))
+
+        if self._our_audio_buffer:
+            caller_path = directory / f"{session_id}_caller.wav"
+            _mulaw_to_wav(bytes(self._our_audio_buffer), str(caller_path))
+            paths["caller"] = str(caller_path)
+
+        return paths
+
+
+def _mulaw_decode(byte: int) -> int:
+    """Decode a single mu-law byte to signed 16-bit PCM."""
+    byte = ~byte & 0xFF
+    sign = byte & 0x80
+    exponent = (byte >> 4) & 0x07
+    mantissa = byte & 0x0F
+    sample = ((mantissa << 3) + 0x84) << exponent
+    sample -= 0x84
+    return -sample if sign else sample
+
+
+def _mulaw_to_wav(mulaw_data: bytes, path: str):
+    """Convert raw mulaw 8kHz audio to a PCM 16-bit WAV file."""
+    pcm_data = bytearray()
+    for b in mulaw_data:
+        sample = _mulaw_decode(b)
+        pcm_data.extend(struct.pack("<h", sample))
+
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit
+        wf.setframerate(8000)
+        wf.writeframes(bytes(pcm_data))

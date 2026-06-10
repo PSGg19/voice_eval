@@ -7,7 +7,7 @@ import logging
 
 import aiosqlite
 
-from .models import CallResult
+from .models import CallResult, LoadTestResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,31 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE INDEX IF NOT EXISTS idx_results_flow ON results(flow_name);
 CREATE INDEX IF NOT EXISTS idx_results_target ON results(target);
 CREATE INDEX IF NOT EXISTS idx_results_created ON results(created_at);
+
+CREATE TABLE IF NOT EXISTS load_results (
+    id TEXT PRIMARY KEY,
+    flow_name TEXT NOT NULL,
+    target TEXT NOT NULL,
+    total_calls INTEGER NOT NULL,
+    passed_calls INTEGER NOT NULL,
+    failed_calls INTEGER NOT NULL,
+    error_calls INTEGER NOT NULL,
+    pass_rate REAL NOT NULL,
+    avg_duration_ms REAL,
+    min_duration_ms REAL,
+    max_duration_ms REAL,
+    p50_duration_ms REAL,
+    p95_duration_ms REAL,
+    total_test_duration_ms REAL,
+    config_json TEXT,
+    call_ids_json TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_load_results_flow ON load_results(flow_name);
+CREATE INDEX IF NOT EXISTS idx_load_results_created ON load_results(created_at);
 """
 
 
@@ -97,6 +122,59 @@ class ResultStore:
             params.append(limit)
 
             rows = await db.execute_fetchall(query, params)
+            return [dict(row) for row in rows]
+
+    async def save_load_result(self, result: LoadTestResult):
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._ensure_schema(db)
+            call_ids = [c.id for c in result.call_results]
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO load_results
+                (id, flow_name, target, total_calls, passed_calls,
+                 failed_calls, error_calls, pass_rate,
+                 avg_duration_ms, min_duration_ms, max_duration_ms,
+                 p50_duration_ms, p95_duration_ms, total_test_duration_ms,
+                 config_json, call_ids_json, started_at, ended_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.id,
+                    result.flow_name,
+                    result.target,
+                    result.total_calls,
+                    result.passed_calls,
+                    result.failed_calls,
+                    result.error_calls,
+                    result.pass_rate,
+                    result.avg_duration_ms,
+                    result.min_duration_ms,
+                    result.max_duration_ms,
+                    result.p50_duration_ms,
+                    result.p95_duration_ms,
+                    result.total_duration_ms,
+                    json.dumps(result.config.model_dump()),
+                    json.dumps(call_ids),
+                    result.started_at.isoformat() if result.started_at else None,
+                    result.ended_at.isoformat() if result.ended_at else None,
+                ),
+            )
+            await db.commit()
+            logger.info("Saved load test %s (%d calls)", result.id, result.total_calls)
+
+    async def get_load_results(self, flow_name: str | None = None, limit: int = 20) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._ensure_schema(db)
+            db.row_factory = aiosqlite.Row
+
+            where = "WHERE flow_name = ?" if flow_name else ""
+            params: list = [flow_name] if flow_name else []
+            params.append(limit)
+
+            rows = await db.execute_fetchall(
+                f"SELECT * FROM load_results {where} ORDER BY created_at DESC LIMIT ?",
+                params,
+            )
             return [dict(row) for row in rows]
 
     async def get_stats(self, flow_name: str | None = None) -> dict:

@@ -83,6 +83,7 @@ class CallResult(BaseModel):
     steps: list[StepResult] = []
     transcript: list[TranscriptEntry] = []
     error: Optional[str] = None
+    recording_paths: dict[str, str] = {}  # {"bot": "path.wav", "caller": "path.wav"}
 
     @property
     def passed(self) -> bool:
@@ -99,3 +100,48 @@ class CallResult(BaseModel):
         self.ended_at = datetime.now(timezone.utc)
         if error:
             self.error = error
+
+
+# --- Load testing ---
+
+
+class LoadTestConfig(BaseModel):
+    calls: int = 10  # total number of calls to make
+    cps: float = 1.0  # calls per second launch rate
+    max_concurrent: int = 0  # 0 = no limit
+
+
+class LoadTestResult(BaseModel):
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
+    flow_name: str
+    target: str
+    config: LoadTestConfig
+
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+
+    # Counts
+    total_calls: int = 0
+    passed_calls: int = 0
+    failed_calls: int = 0
+    error_calls: int = 0
+
+    # Duration stats (ms)
+    avg_duration_ms: float = 0
+    min_duration_ms: float = 0
+    max_duration_ms: float = 0
+    p50_duration_ms: float = 0
+    p95_duration_ms: float = 0
+
+    # Individual call results
+    call_results: list[CallResult] = []
+
+    @property
+    def pass_rate(self) -> float:
+        return (self.passed_calls / self.total_calls * 100) if self.total_calls else 0
+
+    @property
+    def total_duration_ms(self) -> Optional[float]:
+        if self.started_at and self.ended_at:
+            return (self.ended_at - self.started_at).total_seconds() * 1000
+        return None

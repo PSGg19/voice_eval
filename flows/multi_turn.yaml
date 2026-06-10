@@ -1,0 +1,43 @@
+name: "Multi-Turn Conversation"
+target: "+18888590435"
+
+steps:
+  # Turn 0: Bot greets → we give a reference ID
+  - expect:
+      contains_any: ["thank you", "calling", "hello", "welcome", "how", "help", "credit", "assistant"]
+    say: "Hi there, my reference ID is 7 8 4 5 2 1"
+    timeout_ms: 15000
+
+  # Turn 1: Bot responds to reference ID → we ask about balance
+  - expect:
+      contains_any: ["reference", "verify", "confirm", "account", "record", "quality", "assist", "sorry", "number", "note", "speak"]
+    say: "Yes sure. Can you tell me what my current outstanding balance is?"
+    timeout_ms: 15000
+
+  # Turn 2: Bot responds about balance → we ask about payment options
+  - expect:
+      contains_any: ["balance", "amount", "payment", "dollar", "owe", "account", "verify", "help", "sorry", "information", "provide", "unable"]
+    say: "Okay, what payment options do you have available? Can I pay over the phone?"
+    timeout_ms: 15000
+
+  # Turn 3: Bot responds about payment → we ask about payment plans
+  - expect:
+      contains_any: ["payment", "pay", "phone", "card", "option", "online", "help", "sorry", "website", "transfer", "assist", "information"]
+    say: "Do you offer any monthly payment plans or installment options?"
+    timeout_ms: 15000
+
+  # Turn 4: Bot responds about plans → we ask about mailing address
+  - expect:
+      contains_any: ["plan", "monthly", "install", "payment", "help", "sorry", "option", "arrange", "amount", "information", "assist", "available"]
+    say: "One more question. Can you confirm the mailing address you have on file for me?"
+    timeout_ms: 15000
+
+  # Turn 5: Bot responds → we wrap up
+  - expect:
+      contains_any: ["address", "mail", "file", "help", "sorry", "confirm", "information", "anything", "else", "assist", "provide", "verify"]
+    say: "That is all I needed for now. Thank you very much for your help. Have a great day."
+    timeout_ms: 15000
+
+success_criteria:
+  all_steps_passed: true
+  max_latency_ms: 8000
