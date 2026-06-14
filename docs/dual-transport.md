@@ -475,10 +475,13 @@ Not blockers, but the text transport must handle all four.
    populates, so it is `None` on every text turn — but it is survivable and not
    the trigger. Worth its own ticket; do not conflate the two.
 
-   The differentiator is the account, not the module: 5/5 hangs on Veros account
-   `3540624`, 0/6 on `1234568`, same assistant, same `EXPLAIN_DUE`. Something in
-   that account's context makes Gemini return empty deterministically — a safety
-   block or a finish_reason the runtime does not inspect.
+   The differentiator is the account, not the module: 5/5 hangs on one live
+   Veros account, 0/6 on the `1234568` test account, same assistant, same
+   `EXPLAIN_DUE`. Something in that account's context makes Gemini return empty
+   deterministically — a safety block or a finish_reason the runtime does not
+   inspect. (The live account number is deliberately not recorded here — it
+   identifies a real customer, and which account it was does not change the
+   finding. It is in the interaction metadata if anyone needs to reproduce.)
 
    **The OSV bug worth escalating** is not the empty response itself but the
    handling: the runtime *detects* failure at `livekit.py:264` and then lets the
