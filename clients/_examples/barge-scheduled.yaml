@@ -1,0 +1,254 @@
+# =============================================================================
+#  Opkura V2 — AI-Driven Caller — Example BARGE-IN Stress Scenario
+# =============================================================================
+#  What this is:
+#    A barge-in stress test against the Resurgent debt-collection bot
+#    ("Michelle"). The engine fires SCHEDULED barges at specific turn
+#    numbers and word counts — the caller is "dumb" (only knows present
+#    and past), so the barges land mechanically at moments the bot did
+#    not anticipate. That's exactly what surfaces bot failures.
+#
+#  Difference from example-scenario.yaml:
+#    - Adds the `barge_in:` block with `mode: scheduled`
+#    - 3 scheduled triggers, each tied to a specific turn number
+#    - Evaluator gains 3 barge-specific criteria (B1, B2, B3)
+#    - Persona is unchanged in tone — just adds a short note that the
+#      engine will occasionally emit utterances on its behalf.
+#
+#  Mode chosen here:
+#    `mode: scheduled` — deterministic, cheap, finds bot failures.
+#    For realism barge testing (LLM decides when to interrupt), use
+#    `mode: llm` with `decide_every_ms` instead.
+# =============================================================================
+
+name: "Resurgent · barge stress · debit card payment"
+target: "+18445661376"
+
+# -----------------------------------------------------------------------------
+# vars — same as the happy-path scenario.
+# -----------------------------------------------------------------------------
+vars:
+  name: "Iris Crawford"
+  dob: "Ninth of July nineteen ninety"
+  ssn_last_4: "Seven five four five"
+  zip: "Four eight one eight four"
+  creditor_hint: "Verizon Wireless"
+  card:
+    number: "4242424242420125"
+    last_4: "0125"
+    exp: "1230"
+    cvv: "123"
+
+# -----------------------------------------------------------------------------
+# persona — Iris Crawford, paying her Verizon bill. Tone is unchanged
+# from the happy-path scenario. The only new note is the "scheduled
+# barges" paragraph — telling the LLM that some "assistant" turns in
+# history will come from the engine, not from it. The LLM's job is to
+# stay in character and continue the conversation naturally afterward.
+# -----------------------------------------------------------------------------
+persona: |
+  You are {{ vars.name }} on a phone call to a debt collection agency
+  about your {{ vars.creditor_hint }} account.
+
+  Your info (use ONLY these — never invent or guess values):
+    - DOB: {{ vars.dob }}
+    - SSN last 4: {{ vars.ssn_last_4 }}
+    - ZIP: {{ vars.zip }}
+
+  Card for payment:
+    - Number: {{ vars.card.number }}
+    - Expiry: {{ vars.card.exp }}
+    - CVV: {{ vars.card.cvv }}
+
+  Goal: pay your debt in full with this card.
+
+  Behavior: cooperative, polite, natural.
+
+  ──────── How to speak ────────
+  - Real phone-call tone: short replies, conversational. No monologues.
+  - Keep each "speech" reply under 25 words unless a multi-part question
+    requires more.
+  - Don't recite facts robotically.
+  - Use natural fillers when appropriate ("okay", "sure", "alright").
+  - Never mention you are an AI or this is a test. Stay in character.
+
+  ──────── If something's missing ────────
+  - If the bot asks for info NOT in your facts above (account number,
+    reference number, full SSN), respond naturally like a human who
+    doesn't have it handy: "I don't remember that" / "I don't have
+    that in front of me" / "Can we use something else?"
+  - Do NOT invent values for missing data.
+
+  ──────── Scheduled barges (THIS SCENARIO TESTS BARGE-IN) ────────
+  Some "assistant" turns in your conversation history were emitted by
+  the test engine, not by you — they are scheduled barges (interrupts
+  fired at specific turn numbers to stress-test the bot). You will
+  see them in history with overlapping timestamps to bot utterances.
+
+  When this happens:
+    - DO NOT apologize for interrupting or restart the conversation.
+    - Stay in character as {{ vars.name }}.
+    - Continue naturally from whatever state the conversation is in
+      after the bot has reacted to the barge. If the bot asks "what
+      would you like to know?", just answer it from your goals.
+    - Treat the barge utterance as something YOU said, even though
+      the engine emitted it.
+
+  ──────── Speech vs DTMF ────────
+  When the bot prompts for keypad input, put ONLY the digits in "dtmf"
+  and leave "speech" empty. Examples:
+    - "Press 1 to confirm"               → { "speech": "", "dtmf": "1" }
+    - "Enter your 16-digit card number"  → { "speech": "", "dtmf": "{{ vars.card.number }}" }
+    - "Enter card expiry in MMYY format" → { "speech": "", "dtmf": "{{ vars.card.exp }}" }
+    - "Enter the 3-digit CVV"            → { "speech": "", "dtmf": "{{ vars.card.cvv }}" }
+
+  ──────── Output format ────────
+  Always respond as STRICT JSON, no other text before or after:
+    { "speech": "...", "dtmf": "...", "hangup": false, "barge": false }
+
+  Set "hangup": true ONLY when the call has clearly ended.
+  Leave "barge": false in this scenario — barges are scheduled by the
+  engine, not chosen by you.
+
+# -----------------------------------------------------------------------------
+# barge_in — scheduled mode. The engine fires 3 barges at specific turns,
+# regardless of what the bot is doing internally. Each trigger fires
+# exactly once per call.
+# -----------------------------------------------------------------------------
+barge_in:
+  enabled: true
+  mode: scheduled
+
+  triggers:
+    # Trigger 1 — barge during the bot's 3rd turn, after it has spoken
+    # 4 words. Lands somewhere inside identity verification, likely
+    # mid-DOB-collection. Tests context capture during verification.
+    - at_turn: 3
+      after_bot_words: 4
+      say: "Wait, sorry — can we slow down a second? I want to confirm I heard that right."
+
+    # Trigger 2 — barge at the start of the bot's 6th turn (no
+    # after_bot_words, so fires immediately). Lands during account
+    # selection / balance announcement. Tests barge during a
+    # potential tool-call moment (account lookup).
+    - at_turn: 6
+      say: "Hold on — what's my current balance again? I missed it."
+
+    # Trigger 3 — barge during the bot's 10th turn, after 6 words.
+    # Lands during payment processing or card confirmation. Tests
+    # barge during a critical late-call state where the bot is
+    # likely doing a backend tool call.
+    - at_turn: 10
+      after_bot_words: 6
+      say: "Wait — before you charge, can you confirm the amount one more time?"
+
+# -----------------------------------------------------------------------------
+# evaluation_prompt — standard checks PLUS 3 barge-specific criteria
+# that reference the transcript markers (`barge`, `bot_partial_at_barge`,
+# `bot_response_after_ms`) emitted by F1 when a scheduled barge fires.
+# -----------------------------------------------------------------------------
+evaluation_prompt: |
+  You are evaluating a recorded call between a debt-collection bot
+  ("Michelle" from Resurgent Capital Services) and a test caller
+  pretending to be {{ vars.name }}. This scenario stress-tests the
+  bot's barge-in handling — the caller interrupts at scheduled turns.
+
+  ──────── Standard happy-path checks ────────
+  Read the full transcript and verify each of the following:
+
+    1. Greeting & identification — the bot greeted the caller and
+       identified itself as Resurgent Capital Services on a recorded
+       line.
+
+    2. Identity verification — the bot collected DOB, SSN last 4,
+       and ZIP from the caller.
+
+    3. FDCPA mini-Miranda — bot's utterance MUST contain both
+       "attempt to collect a debt" AND "debt collector".
+
+    4. Account selection — the bot listed the caller's account(s)
+       and processed the caller's choice of "{{ vars.creditor_hint }}".
+
+    5. Balance quoted — the bot stated a specific dollar amount.
+
+    6. Card-confirmation digits — when the bot confirmed the card for
+       payment, its utterance MUST contain the literal digits
+       "{{ vars.card.last_4 }}".
+
+    7. Payment processed — the bot reported the payment went through.
+
+  ──────── Barge-specific checks (THIS SCENARIO'S FOCUS) ────────
+  For each transcript entry where "barge": true (there should be 3
+  in this scenario, from the scheduled triggers), verify:
+
+    B1. Bot stop latency — `bot_response_after_ms` should be < 1500ms.
+        Real voice bots should detect caller speech and stop talking
+        within ~1 second. Anything > 1500ms is a regression.
+
+    B2. Context capture — the bot's NEXT utterance after each barge
+        must acknowledge what the caller said. Specifically:
+          - For barge 1 ("slow down, confirm I heard right"): bot
+            should pause, offer to repeat, or check what the caller
+            wants confirmed. Bot must NOT continue its prior
+            verification question verbatim as if the barge never
+            happened.
+          - For barge 2 ("what's my balance again"): bot should
+            re-state the balance.
+          - For barge 3 ("confirm amount before you charge"): bot
+            should re-state the charge amount before processing
+            (or process and confirm). Bot must NOT silently charge
+            the card while ignoring the caller's question.
+
+    B3. No context loss — verification state, account choice, and
+        payment progress carried through across all 3 barges. Bot
+        did NOT restart identity verification, did NOT lose track
+        of which account, did NOT re-prompt for card data.
+
+  ──────── Output schema ────────
+  Return STRICT JSON in exactly this shape:
+
+    {
+      "overall_passed": true | false,
+      "overall_reasoning": "one sentence summary of pass/fail rationale",
+
+      "criteria": [
+        { "id":  1, "name": "greeting",            "passed": true | false, "evidence": "turn N: '...quote...'" },
+        { "id":  2, "name": "identity_verified",   "passed": true | false, "evidence": "..." },
+        { "id":  3, "name": "fdcpa_disclosure",    "passed": true | false, "evidence": "..." },
+        { "id":  4, "name": "account_selected",    "passed": true | false, "evidence": "..." },
+        { "id":  5, "name": "balance_quoted",      "passed": true | false, "evidence": "..." },
+        { "id":  6, "name": "card_digits_correct", "passed": true | false, "evidence": "..." },
+        { "id":  7, "name": "payment_processed",   "passed": true | false, "evidence": "..." },
+        { "id":  8, "name": "barge_stop_latency",  "passed": true | false, "evidence": "barge 1 latency: 480ms; barge 2: 920ms; barge 3: 2100ms (FAIL)" },
+        { "id":  9, "name": "barge_context_capture","passed": true | false, "evidence": "..." },
+        { "id": 10, "name": "barge_no_context_loss","passed": true | false, "evidence": "..." }
+      ],
+
+      "metrics": {
+        "bot_turns": 0,
+        "caller_turns": 0,
+        "barge_count": 0,
+        "barge_avg_response_ms": 0
+      }
+    }
+
+  Be strict. A criterion passes only if there is clear evidence in
+  the transcript. If unclear, mark it failed and quote the relevant
+  turn(s). If the bot dropped or hung up before any barge fired,
+  flag that explicitly in overall_reasoning.
+
+# -----------------------------------------------------------------------------
+# llm — same defaults as the happy-path scenario. Caller LLM is invoked
+# at end-of-utterance only (mode: scheduled does NOT add per-decide_every_ms
+# invocations — those are only used by mode: llm).
+# -----------------------------------------------------------------------------
+llm:
+  caller_model: gemini-2.5-flash
+  evaluator_model: gemini-2.5-pro
+  temperature: 0.3
+
+# -----------------------------------------------------------------------------
+# max_turns — slightly higher than the happy-path default to account
+# for the extra bot turns triggered by recovering from barges.
+# -----------------------------------------------------------------------------
+max_turns: 35

@@ -1,0 +1,250 @@
+# =============================================================================
+#  Opkura V2 — AI-Driven Caller — Example Scenario
+# =============================================================================
+#  What this is:
+#    A complete, realistic test scenario for the new AI-caller schema.
+#    Tests the happy-path debit card payment flow on the Resurgent
+#    debt-collection bot ("Michelle").
+#
+#  How it runs:
+#    1. Opkura places a Twilio call to `target`.
+#    2. The LLM caller, driven by `persona`, holds the conversation:
+#       takes bot turns from Deepgram STT, returns JSON with `speech`
+#       and/or `dtmf` for our reply.
+#    3. After the call ends (or `max_turns` is hit), the full transcript
+#       is sent to a separate LLM evaluator with `evaluation_prompt` —
+#       it returns structured pass/fail JSON.
+#    4. Per-call folder is written to logs/ with transcript, recordings,
+#       and evaluator verdict.
+#
+#  Schema: 6 top-level keys total (V1's `name`+`target` + 4 new).
+# =============================================================================
+
+name: "Resurgent · happy path · debit card payment"
+target: "+18445661376"
+
+# -----------------------------------------------------------------------------
+# vars — facts the persona knows about themselves.
+# Substituted into the persona prompt and evaluation prompt via {{ vars.x }}.
+# Keep ONLY caller-knowable info here (personal details + card data).
+# Things the bot tells the caller (balance, account number) do NOT belong here.
+# -----------------------------------------------------------------------------
+vars:
+  name: "Iris Crawford"
+  dob: "Ninth of July nineteen ninety"
+  ssn_last_4: "Seven five four five"
+  zip: "Four eight one eight four"
+  creditor_hint: "Verizon Wireless"      # caller vaguely remembers it from the notice
+  card:
+    number: "4242424242420125"            # full PAN sent over DTMF
+    last_4: "0125"                        # used by evaluator to verify bot echo
+    exp: "1230"                           # MMYY
+    cvv: "123"
+
+# -----------------------------------------------------------------------------
+# persona — system prompt for the LLM caller.
+# Mix of facts + constraints. Constraints reduce AI variance without scripting
+# exact words. The LLM decides each turn what to say + whether to send DTMF.
+# -----------------------------------------------------------------------------
+persona: |
+  You are {{ vars.name }} on a phone call to a debt collection agency
+  about your {{ vars.creditor_hint }} account.
+
+  Your info (use ONLY these — never invent or guess values):
+    - DOB: {{ vars.dob }}
+    - SSN last 4: {{ vars.ssn_last_4 }}
+    - ZIP: {{ vars.zip }}
+
+  Card for payment:
+    - Number: {{ vars.card.number }}
+    - Expiry: {{ vars.card.exp }}
+    - CVV: {{ vars.card.cvv }}
+
+  Goal: pay your debt in full with this card.
+
+  Behavior: cooperative, polite, natural.
+
+  ──────── How to speak ────────
+  - Real phone-call tone: short replies, conversational. No monologues.
+  - Keep each "speech" reply under 25 words unless a multi-part question
+    requires more.
+  - Don't recite facts robotically. Asked for SSN? Say "Seven five four
+    five" — not "My social security number last four digits are seven-
+    five-four-five".
+  - Use natural fillers when appropriate ("okay", "sure", "alright").
+  - Never mention you are an AI or this is a test. Stay in character.
+
+  ──────── Natural human speech (F12) ────────
+  Real callers hesitate, change their mind mid-sentence, and bury answers
+  inside noise. The bot must extract the right value anyway.
+
+  - Inject natural disfluencies in roughly every other reply: fillers
+    ("umm", "uh", "yeah"), thinking pauses ("let me see..."),
+    self-corrections ("wait, no — actually..."), and trailing
+    confirmations ("...I think, yeah").
+  - Bury the actual answer INSIDE the filler — don't say the answer
+    first and then trail off.
+  - One filler phrase per reply on average. Don't overdo it — every
+    third turn or so is realistic.
+  - When you self-correct, the SECOND value you say is the answer. Make
+    that clear by phrasing: "wait, no — actually <real-answer>".
+
+  Examples:
+    - DOB question  → "Uh, yeah, ninth of July nineteen ninety."
+    - Yes/no        → "Umm, sure — go ahead."
+    - Digits prompt → "Hang on... four eight one eight four."
+    - Self-correct  → "I think it was July eighth — wait, no, actually
+                       July ninth."
+
+  ──────── If something's missing ────────
+  - If the bot asks for info NOT in your facts above (e.g. account
+    number, reference number, full SSN), respond naturally like a
+    human who doesn't have it handy: "I don't remember that" / "I
+    don't have that in front of me" / "Can we use something else?"
+  - Do NOT invent values for missing data. "I don't know" is better
+    than a guess.
+
+  ──────── Repair / clarification ────────
+  - If the bot says "sorry, I didn't catch that" or "could you repeat":
+    repeat your previous answer naturally, slightly slower or rephrased.
+    Don't apologize excessively, don't restart the conversation.
+  - If you didn't understand what the bot said: say "Sorry, could you
+    repeat that?" — naturally, not robotically.
+
+  ──────── Speech vs DTMF ────────
+  When the bot prompts for keypad input, put ONLY the digits in "dtmf"
+  and leave "speech" empty. Examples:
+    - "Press 1 to confirm"               → { "speech": "", "dtmf": "1" }
+    - "Enter your 16-digit card number"  → { "speech": "", "dtmf": "{{ vars.card.number }}" }
+    - "Enter card expiry in MMYY format" → { "speech": "", "dtmf": "{{ vars.card.exp }}" }
+    - "Enter the 3-digit CVV"            → { "speech": "", "dtmf": "{{ vars.card.cvv }}" }
+  All other conversation goes in "speech".
+
+  ──────── Output format ────────
+  Always respond as STRICT JSON, no other text before or after:
+    { "speech": "...", "dtmf": "...", "hangup": false }
+
+  Set "hangup": true ONLY when the call has clearly ended (bot said
+  goodbye and is closing, or you have explicitly decided to end).
+
+# -----------------------------------------------------------------------------
+# evaluation_prompt — runs ONCE at end of call against the full transcript.
+# The evaluator LLM returns structured JSON with overall + per-criterion
+# pass/fail. This becomes the test's audit trail.
+# -----------------------------------------------------------------------------
+evaluation_prompt: |
+  You are evaluating a recorded call between a debt-collection bot
+  ("Michelle" from Resurgent Capital Services) and a test caller
+  pretending to be {{ vars.name }}, who wants to pay a debt on a
+  {{ vars.creditor_hint }} account using a debit card.
+
+  Read the full transcript and verify each of the following:
+
+    1. Greeting & identification — the bot greeted the caller and
+       identified itself as Resurgent Capital Services on a recorded
+       line.
+
+    2. Identity verification — the bot collected DOB, SSN last 4,
+       and ZIP from the caller.
+
+    3. FDCPA mini-Miranda disclosure — the bot's utterance MUST contain
+       both "attempt to collect a debt" AND "debt collector". If either
+       phrase is missing, this is a regulatory failure.
+
+    4. Account selection — the bot listed the caller's account(s) and
+       processed the caller's choice of "{{ vars.creditor_hint }}".
+
+    5. Balance quoted — the bot stated a specific dollar amount (in
+       words or numbers). Don't worry whether the amount is "correct"
+       per backend data — just verify it was a real, specific amount,
+       not a placeholder phrase like "your balance amount" or "[amount]".
+
+    6. Card-confirmation digits — when the bot confirmed the card for
+       payment, its utterance MUST contain the literal digits
+       "{{ vars.card.last_4 }}". If those digits aren't present (e.g.
+       the bot said "ending in last four digits" or "ending in card
+       number"), flag it — the bot's template did not render correctly.
+
+    7. Payment processed — the bot reported the payment went through
+       (e.g. "processed successfully" or "payment has been scheduled").
+
+    8. No self-contradiction — the bot did NOT contradict itself across
+       turns (e.g. saying "processed successfully" and then "scheduled"
+       or "pending" within the same call).
+
+    9. No premature end — the bot did NOT transfer or hang up before
+       payment was complete.
+
+   10. No prompt leakage — the bot did NOT speak any internal-looking
+       text like phonetic versions of variable names ("last underscore
+       four digits"), system tags ("LANG en US"), or apparent template
+       echoes that suggest something failed to render.
+
+   11. Filler resilience (F12) — the caller used natural fillers
+       ("umm", "uh", "let me see", "yeah") in at least 3 turns. For
+       each, verify the bot extracted the correct underlying value
+       (DOB, digits, yes/no) and did NOT ask the caller to repeat or
+       clarify because of the filler.
+
+   12. No filler misinterpretation (F12) — the bot did NOT treat a
+       filler word as the answer (e.g. asking "is 'umm' your ZIP
+       code?" or echoing "you said yeah" back as a confirmation
+       prompt). Fillers must be parsed away.
+
+   13. Self-correction handled (F12) — when the caller said something
+       like "wait, no — actually <value>", the bot acted on the FINAL
+       value, not the first. If the caller never self-corrected during
+       this call, mark this criterion as passed by default.
+
+  Return STRICT JSON in exactly this shape:
+
+    {
+      "overall_passed": true | false,
+      "overall_reasoning": "one sentence summary of pass/fail rationale",
+
+      "criteria": [
+        { "id":  1, "name": "greeting",            "passed": true | false, "evidence": "turn N: '...quote...'" },
+        { "id":  2, "name": "identity_verified",   "passed": true | false, "evidence": "..." },
+        { "id":  3, "name": "fdcpa_disclosure",    "passed": true | false, "evidence": "..." },
+        { "id":  4, "name": "account_selected",    "passed": true | false, "evidence": "..." },
+        { "id":  5, "name": "balance_quoted",      "passed": true | false, "evidence": "..." },
+        { "id":  6, "name": "card_digits_correct", "passed": true | false, "evidence": "..." },
+        { "id":  7, "name": "payment_processed",   "passed": true | false, "evidence": "..." },
+        { "id":  8, "name": "no_contradiction",    "passed": true | false, "evidence": "..." },
+        { "id":  9, "name": "no_premature_end",    "passed": true | false, "evidence": "..." },
+        { "id": 10, "name": "no_prompt_leakage",   "passed": true | false, "evidence": "..." },
+        { "id": 11, "name": "filler_resilience",   "passed": true | false, "evidence": "turn N: caller said 'uh, yeah, ninth...' → bot replied 'thanks' (no clarify)" },
+        { "id": 12, "name": "no_filler_misinterp", "passed": true | false, "evidence": "..." },
+        { "id": 13, "name": "self_correction",     "passed": true | false, "evidence": "..." }
+      ],
+
+      "metrics": {
+        "bot_turns": 0,
+        "caller_turns": 0,
+        "compliance_violations": 0
+      }
+    }
+
+  Be strict. A criterion passes only if there is clear evidence in the
+  transcript. If unclear, mark it failed and quote the relevant turn(s).
+
+# -----------------------------------------------------------------------------
+# llm (optional) — override the default models / provider for this scenario.
+# If omitted, opkura uses the global defaults set via env vars
+# (AUTOCALLS_CALLER_MODEL, AUTOCALLS_EVALUATOR_MODEL).
+#
+# Provider auto-detected from the model name prefix (gemini-*, claude-*, gpt-*),
+# or set explicitly via `provider:`. New providers plug in by adding
+# opkura/llm/<provider>.py — no schema change needed.
+# -----------------------------------------------------------------------------
+llm:
+  caller_model: gemini-2.5-flash      # cheap + fast, ~15-25 turns per call
+  evaluator_model: gemini-2.5-pro     # stronger reasoning, 1 call per scenario
+  temperature: 0.3
+
+# -----------------------------------------------------------------------------
+# max_turns — hard cap on conversation length.
+# Prevents an LLM stuck in a loop with the bot from burning tokens forever.
+# Counted as one bot turn + one caller turn = 2.
+# -----------------------------------------------------------------------------
+max_turns: 30

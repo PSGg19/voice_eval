@@ -3,3 +3,57 @@
 __pycache__/
 *.egg-info/
 dist/
+.venv/
+plan/
+# Generated load-test artifacts (scenario copies + ramp campaigns)
+**/.generated/
+# Claude Code internal state (worktrees, transcripts, etc)
+.claude/
+logs/
+# Job-mode artifacts (v3). Generated scenarios seeded from REAL production
+# interactions, so these carry live customer PII by design — the metadata is
+# what makes a faithful replication possible without test credentials.
+# Never commit anything under here.
+#
+# LEADING SLASH IS LOAD-BEARING: a bare `jobs/` matches a directory of that name
+# at ANY depth, which silently excluded the job-mode SOURCE at `opkura/jobs/`.
+# `/jobs/` anchors it to the repo root, which is the only place artifacts land.
+/jobs/
+# Client bot prompts — confidential per-client IP.
+# Matches system-prompt.md at ANY depth under the repo (e.g. both
+# clients/foo/system-prompt.md and clients/foo/bar/system-prompt.md).
+# Previous single-`*` pattern only matched one level deep, which let
+# clients/resurgent/system-prompt.md slip through.
+**/system-prompt.md
+
+# Client test data is NOT version-controlled.
+#
+# Every client directory holds identities lifted from production interactions so
+# a test replicates the real call faithfully: names, registered phone numbers,
+# SSN last-4, dates of birth, account numbers, addresses, email addresses. Same
+# class of data as `jobs/`, so the same rule applies — never committed, never
+# pasted into a ticket, never moved outside the repo.
+#
+# Blanket rather than per-directory on purpose. Classifying dir-by-dir was tried
+# and it missed things: three real calls' `caller.wav` audio and interaction
+# metadata sat committed under `logs/`, and two `variables.json` files held the
+# source profiles everything else rendered from. A rule with no judgement call in
+# it cannot be judged wrong, and it also covers the next client added by someone
+# who has not read this file.
+#
+# Scenarios live at their natural paths (`clients/<client>/scenarios/...`) and
+# simply are not tracked, so campaigns and relative references work unchanged.
+#
+# Two exceptions, both carrying no identities:
+#   _examples/          reference scenarios to copy when writing a new one; the
+#                       persona is invented (Iris Crawford), and
+#                       tests/conftest.py loads happy-path.yaml
+#   live-assistants.yaml  the guard list — assistant uuids and account COUNTS,
+#                       no customer data. See scripts/refresh_live_assistants.py
+#
+# A negation cannot re-include a file whose parent directory is excluded, so the
+# ignore is `clients/*` (matching entries, not the tree) and the exceptions name
+# the directory itself.
+clients/*
+!clients/_examples
+!clients/live-assistants.yaml

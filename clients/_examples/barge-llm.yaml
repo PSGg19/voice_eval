@@ -1,0 +1,289 @@
+# =============================================================================
+#  Opkura V2 — AI-Driven Caller — Example LLM-DRIVEN BARGE-IN Scenario
+# =============================================================================
+#  What this is:
+#    A barge-in test against the Resurgent debt-collection bot ("Michelle")
+#    using `mode: llm` — the caller LLM decides each moment whether to
+#    barge, using the persona prompt for intent and an optional BCD
+#    (Barge Context Document, see F11/bcg) for the bot's flow context.
+#
+#  Difference from example-barge-scenario.yaml:
+#    - That one uses `mode: scheduled` — engine fires barges mechanically
+#      at scripted turn numbers. The caller is "dumb" and the barges are
+#      deterministic.
+#    - This one uses `mode: llm` — engine invokes the caller LLM every
+#      `decide_every_ms` during bot speech. The LLM sees the partial bot
+#      transcript and decides whether to set "barge": true in its output.
+#      The caller is "smart" — it can aim barges at semantic moments
+#      (tool-call announcements, module transitions) using BCD context.
+#
+#  When to use each:
+#    - `mode: scheduled` — most stress tests. Cheap, deterministic, finds
+#      failures because the caller doesn't politely wait for "good" moments.
+#    - `mode: llm` — realism tests, or targeted semantic-moment barges
+#      (e.g. "barge during EVERY tool-call announcement, no matter which
+#      turn it happens on"). Non-deterministic; more expensive.
+#
+#  This scenario uses the AGGRESSIVE persona flavor — the LLM is told its
+#  job is to actively interrupt at specific bot-state moments. For natural
+#  / realism-only barges, swap the persona's "Interrupting the bot" block
+#  for the natural flavor (see PRD F1).
+# =============================================================================
+
+name: "Resurgent · barge-LLM · semantic-moment interrupts"
+target: "+18445661376"
+
+# -----------------------------------------------------------------------------
+# vars — same caller as the other Resurgent scenarios.
+# -----------------------------------------------------------------------------
+vars:
+  name: "Iris Crawford"
+  dob: "Ninth of July nineteen ninety"
+  ssn_last_4: "Seven five four five"
+  zip: "Four eight one eight four"
+  creditor_hint: "Verizon Wireless"
+  card:
+    number: "4242424242420125"
+    last_4: "0125"
+    exp: "1230"
+    cvv: "123"
+
+# -----------------------------------------------------------------------------
+# persona — Iris Crawford. Same base behavior as the happy-path scenario,
+# PLUS an explicit "Interrupting the bot" block that tells the LLM when
+# to set "barge": true in its output JSON. The LLM uses the BCD context
+# (loaded from bot_context_path below) to identify tool-call and
+# module-switch moments and barge at them.
+# -----------------------------------------------------------------------------
+persona: |
+  You are {{ vars.name }} on a phone call to a debt collection agency
+  about your {{ vars.creditor_hint }} account.
+
+  Your info (use ONLY these — never invent or guess values):
+    - DOB: {{ vars.dob }}
+    - SSN last 4: {{ vars.ssn_last_4 }}
+    - ZIP: {{ vars.zip }}
+
+  Card for payment:
+    - Number: {{ vars.card.number }}
+    - Expiry: {{ vars.card.exp }}
+    - CVV: {{ vars.card.cvv }}
+
+  Goal: pay your debt in full with this card.
+
+  Behavior: cooperative, polite, natural.
+
+  ──────── How to speak ────────
+  - Real phone-call tone: short replies, conversational. No monologues.
+  - Keep each "speech" reply under 25 words.
+  - Don't recite facts robotically. Use natural fillers when appropriate.
+  - Never mention you are an AI or this is a test. Stay in character.
+
+  ──────── Interrupting the bot (THIS SCENARIO TESTS BARGE-IN) ────────
+  Your job in this scenario is to ACTIVELY interrupt the bot at specific
+  bot states and see how it reacts. Don't be polite about it — barging
+  is the test. The Bot Context Document (loaded into your context) tells
+  you what the bot's modules, transitions, and tool-call moments look
+  like — use it to identify when to barge.
+
+  Set "barge": true in your output JSON at these moments:
+
+  1. TOOL-CALL BARGE — when the bot pauses or says phrases like
+     "one moment", "let me check", "pulling up your account",
+     "verifying", "processing now" (see Tool-Call Moments in BCD).
+     Interrupt with extra info or a question:
+       Example: { "speech": "Oh, also — can I use a different card?",
+                  "dtmf": "", "hangup": false, "barge": true }
+     Tests: does the bot handle caller speech during backend work?
+
+  2. MODULE-SWITCH BARGE — when the bot transitions between modules
+     ("alright, moving on to payment", "next I'll need", "let me pull
+     up your account") (see Module Transitions in BCD). Interrupt
+     with a request to revisit something:
+       Example: { "speech": "Wait, can we go back to the previous step?",
+                  "dtmf": "", "hangup": false, "barge": true }
+     Tests: does the bot preserve context across module switches?
+
+  3. MID-EXPLANATION BARGE — occasionally, when the bot is mid-sentence
+     in a disclosure or long explanation, interrupt with a clarifying
+     question:
+       Example: { "speech": "Sorry — what was that amount again?",
+                  "dtmf": "", "hangup": false, "barge": true }
+     Tests: does the bot stop speaking and capture your input?
+
+  Aim for at least 3 barges across different bot states per call.
+  Every barge must carry real content (a question, answer, or
+  correction) — so the evaluator can verify the bot captured it.
+
+  When you are NOT barging (most invocations), return
+  "barge": false and let the bot finish its turn.
+
+  ──────── If something's missing ────────
+  - If the bot asks for info NOT in your facts above, respond like a
+    human who doesn't have it handy: "I don't remember that" / "Can
+    we use something else?" Do NOT invent values.
+
+  ──────── Speech vs DTMF ────────
+  When the bot prompts for keypad input, put ONLY the digits in "dtmf":
+    - "Press 1 to confirm"               → { "speech": "", "dtmf": "1", ... }
+    - "Enter your 16-digit card number"  → { "speech": "", "dtmf": "{{ vars.card.number }}", ... }
+    - "Enter card expiry in MMYY format" → { "speech": "", "dtmf": "{{ vars.card.exp }}", ... }
+    - "Enter the 3-digit CVV"            → { "speech": "", "dtmf": "{{ vars.card.cvv }}", ... }
+
+  ──────── Output format ────────
+  Always respond as STRICT JSON, no other text before or after:
+    { "speech": "...", "dtmf": "...", "hangup": false, "barge": false }
+
+  Set "hangup": true ONLY when the call has clearly ended.
+  Set "barge": true ONLY when you are deliberately interrupting per the
+  rules above. Default is "barge": false.
+
+# -----------------------------------------------------------------------------
+# barge_in — LLM mode. Engine invokes the caller LLM every 500ms during
+# bot speech (in addition to the normal end-of-utterance invocation).
+# The LLM sees the partial bot transcript and decides whether to barge.
+#
+# `bot_context_path` points to a BCD (Barge Context Document) — a curated
+# markdown file generated by `opkura bcg <bot-prompt> -o <bcd-path>` (see
+# F11). The BCD is appended to the persona's system prompt at call start
+# so the LLM knows the bot's modules, transition phrases, and tool-call
+# moments. Without a BCD the LLM still works — it just has less context
+# to time semantic barges.
+# -----------------------------------------------------------------------------
+barge_in:
+  enabled: true
+  mode: llm
+
+  decide_every_ms: 500
+  # How often the LLM gets a decision opportunity during bot speech.
+  # Cost lever: 500ms = ~2 LLM calls per second of bot speech (with
+  # prompt caching, marginal cost is small — only the partial bot
+  # transcript is variable input).
+
+  bot_context_path: "clients/resurgent/bargin-context.md"
+  # Optional. Generated once via:
+  #   opkura bcg clients/resurgent/michelle-prompt.txt \
+  #     -o clients/resurgent/bargin-context.md
+  # If the file doesn't exist, lint fails. To run this scenario
+  # without a BCD, remove this line — the LLM will still receive
+  # the persona's "Interrupting the bot" instructions and barge
+  # based on the raw partial bot transcript alone.
+
+# -----------------------------------------------------------------------------
+# evaluation_prompt — standard happy-path checks PLUS LLM-barge-specific
+# criteria. Unlike scheduled mode (where we know exactly which turns
+# fired barges), in LLM mode the barge count and timing are variable —
+# so the evaluator must reason about whether the barges that DID fire
+# landed at meaningful moments.
+# -----------------------------------------------------------------------------
+evaluation_prompt: |
+  You are evaluating a recorded call between a debt-collection bot
+  ("Michelle" from Resurgent Capital Services) and a test caller
+  pretending to be {{ vars.name }}. This scenario tests barge-in
+  handling — the caller's LLM was instructed to actively interrupt
+  at semantic moments (tool calls, module switches, mid-explanation).
+
+  ──────── Standard happy-path checks ────────
+
+    1. Greeting & identification — bot greeted and identified itself
+       as Resurgent Capital Services on a recorded line.
+
+    2. Identity verification — bot collected DOB, SSN4, and ZIP.
+
+    3. FDCPA mini-Miranda — bot's utterance contains BOTH "attempt
+       to collect a debt" AND "debt collector".
+
+    4. Account selection — bot listed accounts and processed the
+       caller's choice of "{{ vars.creditor_hint }}".
+
+    5. Balance quoted — bot stated a specific dollar amount.
+
+    6. Card-confirmation digits — bot's confirmation utterance contains
+       the literal digits "{{ vars.card.last_4 }}".
+
+    7. Payment processed — bot reported payment success.
+
+  ──────── LLM-barge-specific checks (THIS SCENARIO'S FOCUS) ────────
+
+    L1. Barges actually fired — the transcript contains at least 3
+        entries with "barge": true. If zero or fewer than 3, the LLM
+        failed to follow the persona's barge instructions (this is a
+        TEST failure, not a BOT failure — flag it in reasoning).
+
+    L2. Barge timing was semantic — each "barge": true entry's
+        `bot_partial_at_barge` field should show the bot was either:
+          (a) starting a tool-call moment ("one moment", "let me
+              check", "pulling up", "verifying", "processing"), OR
+          (b) starting a module transition ("alright, moving on",
+              "next I'll need", "let me pull up your account"), OR
+          (c) in the middle of a long explanation/disclosure.
+        Random barges (mid-greeting, mid-goodbye) do NOT count — flag
+        those as LLM barge-targeting failures.
+
+    L3. Bot stop latency — for each barge, `bot_response_after_ms`
+        should be < 1500ms. Anything > 1500ms is a bot regression.
+
+    L4. Context capture after barge — for each barge entry, the bot's
+        NEXT utterance must acknowledge what the caller said. The bot
+        must NOT continue its prior utterance as if the barge never
+        happened, AND must NOT restart its prior question from the
+        beginning.
+
+    L5. No context loss across barges — verification state, account
+        choice, and payment progress carried through. Bot did NOT
+        restart identity verification, lose the account choice, or
+        re-prompt for card data after a barge.
+
+  ──────── Output schema ────────
+  Return STRICT JSON in exactly this shape:
+
+    {
+      "overall_passed": true | false,
+      "overall_reasoning": "one sentence summary of pass/fail rationale",
+
+      "criteria": [
+        { "id":  1, "name": "greeting",             "passed": true | false, "evidence": "turn N: '...quote...'" },
+        { "id":  2, "name": "identity_verified",    "passed": true | false, "evidence": "..." },
+        { "id":  3, "name": "fdcpa_disclosure",     "passed": true | false, "evidence": "..." },
+        { "id":  4, "name": "account_selected",     "passed": true | false, "evidence": "..." },
+        { "id":  5, "name": "balance_quoted",       "passed": true | false, "evidence": "..." },
+        { "id":  6, "name": "card_digits_correct",  "passed": true | false, "evidence": "..." },
+        { "id":  7, "name": "payment_processed",    "passed": true | false, "evidence": "..." },
+        { "id":  8, "name": "barges_fired",         "passed": true | false, "evidence": "3 barges at turns 4, 7, 11" },
+        { "id":  9, "name": "barge_timing_semantic","passed": true | false, "evidence": "barge 1 landed mid-tool-call ('one moment'); barge 2 mid-module-switch ('moving on to'); barge 3 random mid-greeting (FAIL)" },
+        { "id": 10, "name": "barge_stop_latency",   "passed": true | false, "evidence": "barge 1: 480ms; barge 2: 920ms; barge 3: 2100ms (FAIL)" },
+        { "id": 11, "name": "barge_context_capture","passed": true | false, "evidence": "..." },
+        { "id": 12, "name": "barge_no_context_loss","passed": true | false, "evidence": "..." }
+      ],
+
+      "metrics": {
+        "bot_turns": 0,
+        "caller_turns": 0,
+        "barge_count": 0,
+        "barge_avg_response_ms": 0,
+        "semantic_barge_count": 0
+      }
+    }
+
+  Be strict. A criterion passes only if there is clear evidence in
+  the transcript. If unclear, mark it failed and quote the relevant
+  turn(s). Distinguish in your reasoning between BOT failures (the
+  bot mis-handled a barge) and TEST failures (the LLM didn't barge,
+  or barged at meaningless moments).
+
+# -----------------------------------------------------------------------------
+# llm — caller defaults to flash for cost, but in LLM-barge mode the
+# caller is invoked more often. With prompt caching the marginal cost
+# per in-turn invocation is small (~$0.001), and a 30-turn call with
+# `decide_every_ms: 500` adds ~$0.05–0.15 vs the happy-path scenario.
+# -----------------------------------------------------------------------------
+llm:
+  caller_model: gemini-2.5-flash
+  evaluator_model: gemini-2.5-pro
+  temperature: 0.3
+
+# -----------------------------------------------------------------------------
+# max_turns — higher than the happy-path default to account for the
+# extra bot recovery turns each barge triggers.
+# -----------------------------------------------------------------------------
+max_turns: 40

@@ -1,313 +1,364 @@
-# Opkura
+# Opkura — Voice-Bot Test Runner
 
-Automated voice AI testing tool. Call your bots, follow scripted conversation flows, send DTMF tones, and verify they're up and stable.
-
-```
-You define a YAML flow → Opkura calls your bot → listens via STT → speaks back via TTS → evaluates pass/fail
-```
-
-## How It Works
+Opkura places a **real phone call** to a voice bot, plays the caller with an LLM,
+and judges the result.
 
 ```
-┌─────────────┐     Twilio API      ┌──────────────┐
-│   Opkura     │ ──── outbound ────▶ │  Your Voice   │
-│   Engine     │     phone call      │  Bot (phone#) │
-│              │                     └──────┬───────┘
-│  ┌────────┐  │◀── Media Stream (WS) ─────┘
-│  │  STT   │◀─│─── transcribes bot audio
-│  │  TTS   │──│──▶ speaks as caller
-│  │  DTMF  │──│──▶ sends keypad tones
-│  │  Flow   │  │    follows YAML script
-│  │  Eval   │  │    checks pass/fail
-│  └────────┘  │
-└──────┬───────┘
-       │
-  ┌────▼────┐
-  │ SQLite   │  Results + transcripts
-  └─────────┘
+scenario YAML  →  opkura places the call  →  caller LLM holds the conversation
+(STT/TTS in real time)  →  evaluator LLM scores the transcript  →  a folder
+under logs/ with everything: transcript, audio, evaluation, debug log.
 ```
 
-**The call pipeline step by step:**
+Three ways to drive it:
 
-1. Opkura makes an outbound call to your bot's phone number via Twilio
-2. Twilio opens a bidirectional audio WebSocket (Media Stream) back to Opkura
-3. Bot speaks → audio is streamed to Deepgram STT → real-time transcript
-4. Opkura's flow engine evaluates the transcript against your expected keywords
-5. Flow engine picks the next response → Deepgram TTS generates audio (or DTMF tones are synthesized)
-6. Audio is sent back through the Twilio WebSocket → bot hears it
-7. Repeat until flow completes
-8. Results are stored in SQLite and printed to terminal
+| Mode | Input | Who writes the scenario |
+|---|---|---|
+| `opkura run <scenario.yaml>` | one scenario | you |
+| `opkura campaign <campaign.yaml>` | a list of scenarios | you |
+| **job mode** (HTTP, `POST /v1/jobs`) | **a list of faulty production calls** | **opkura, from the real call data** |
 
-## Prerequisites
+> **Only want to *use* job mode against someone else's running instance?**
+> You need nothing from this repo — read **[docs/job-api.md](docs/job-api.md)**
+> instead. No clone, no install, no credentials. Everything below is for running
+> opkura yourself.
 
-- **Python 3.11+**
-- **Twilio account** with:
-  - Account SID and Auth Token ([console.twilio.com](https://console.twilio.com))
-  - A phone number with Voice capability (this is the caller ID for outbound calls)
-- **Deepgram account** for STT and TTS ([deepgram.com](https://deepgram.com))
-- **ngrok** (for local development) or a server with a public URL
+---
 
 ## Setup
 
-### 1. Clone the repo
+### 1. Python 3.11 or 3.12
+
+Not 3.13: `transport/vad.py` uses `audioop`, which PEP 594 removed from the
+stdlib in 3.13. Verified on 3.12.
 
 ```bash
-git clone https://github.com/skit-ai/opkura.git
-cd opkura
-```
-
-### 2. Create a virtual environment and install
-
-```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
 
-### 3. Configure environment variables
+Add the Silero turn-end detector only if you want it — it pulls torch (~200MB)
+and defaults to off:
 
 ```bash
-cp .env.example .env
+pip install -e '.[vad]'      # then AUTOCALLS_USE_SILERO_VAD=true
 ```
 
-Edit `.env` with your credentials:
+### 2. A public HTTPS tunnel — always required
+
+Twilio fetches TwiML from opkura and opens the media WebSocket *inbound*, so
+localhost cannot work. Any tunnel is fine:
 
 ```bash
-# Twilio — from https://console.twilio.com
-AUTOCALLS_TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-AUTOCALLS_TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-AUTOCALLS_TWILIO_PHONE_NUMBER=+1xxxxxxxxxx    # your Twilio number (caller ID)
-
-# Deepgram — from https://console.deepgram.com
-AUTOCALLS_DEEPGRAM_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Server
-AUTOCALLS_SERVER_HOST=0.0.0.0
-AUTOCALLS_SERVER_PORT=8765
-AUTOCALLS_PUBLIC_URL=https://your-ngrok-url.ngrok-free.dev    # see step 4
-
-# Storage
-AUTOCALLS_DB_PATH=autocalls.db
+cloudflared tunnel --url http://localhost:8765
+# copy the https URL into AUTOCALLS_PUBLIC_URL
 ```
 
-### 4. Start ngrok (local development)
+### 3. Redis — required for job mode only
 
-Twilio needs to reach your machine to stream audio. In a **separate terminal**:
+Job state and the per-client prompt cache. `run`, `campaign` and `lint` don't
+touch it.
 
 ```bash
-ngrok http 8765
+docker run -d -p 6379:6379 --name opkura-redis redis
 ```
 
-Copy the `https://...ngrok-free.dev` URL from the output and set it in `.env`:
+If `redis` isn't installed or isn't reachable, the server still starts and the
+Twilio webhooks still serve — that's deliberate, an in-flight call must not die
+for a missing subsystem — but `/v1/jobs` returns **404** and the only clue is a
+startup line:
+
+```
+WARNING  Job API not mounted (ModuleNotFoundError: No module named 'redis')
+```
+
+### 4. Configure
+
+Copy [.env.example](.env.example) to `.env` and fill it in. **Every variable
+takes the `AUTOCALLS_` prefix** — pydantic-settings reads `.env` itself, and the
+file is never exported to the process environment.
+
+Minimum, whatever you're running:
+
+```
+AUTOCALLS_TWILIO_ACCOUNT_SID=AC...
+AUTOCALLS_TWILIO_AUTH_TOKEN=...
+AUTOCALLS_TWILIO_PHONE_NUMBER=+1...      # caller ID
+AUTOCALLS_DEEPGRAM_API_KEY=...           # STT + TTS
+AUTOCALLS_GEMINI_API_KEY=...             # caller + evaluator LLM
+AUTOCALLS_PUBLIC_URL=https://<tunnel>
+```
+
+Job mode adds:
+
+```
+AUTOCALLS_CALL_TRANSPORT=sip             # job mode refuses pstn — see below
+AUTOCALLS_SIP_DESTINATION_HOST=581mqcm8zvu.sip.livekit.cloud:5060
+AUTOCALLS_SIP_TRUNK_NUMBER=1205
+AUTOCALLS_OSV_BASE_URL=https://llm-studio.skit.ai/us/api/interface
+AUTOCALLS_OSV_ACCESS_TOKEN="<SkitAdmin access JWT>"
+AUTOCALLS_OPENAI_API_KEY=sk-...          # writes the scenarios
+AUTOCALLS_REDIS_URL=redis://localhost:6379/0
+```
+
+The OSV token is a **short-lived access token (~8h)** copied from a logged-in
+llm-studio session: DevTools → Network → any `/api/interface/` request → the
+`authorization: Bearer …` header. Keep it quoted in `.env`; pydantic strips the
+quotes, but any script that parses `.env` by hand will send the quotes along and
+get `401 Invalid token` from a perfectly good token.
+
+### 5. Start the server
+
+Needed for job mode, and for `run`/`campaign` too — that's what Twilio calls back
+into.
 
 ```bash
-AUTOCALLS_PUBLIC_URL=https://paragenetic-unsluiced-elayne.ngrok-free.dev
+opkura serve                 # or: python -m opkura serve
 ```
 
-> **Note:** The ngrok URL changes every time you restart ngrok (on the free plan). Update `.env` accordingly. For production, deploy on a server with a stable public URL.
+---
 
-## Usage
+## Outbound transport — PSTN or pure SIP
 
-### Run a single test
+By default opkura dials the scenario's `target` as an E.164 number, so the call
+routes over the PSTN to the bot's DID and in through that DID's SIP trunk. That
+works, but it costs a carrier leg and drops every custom SIP header — leaving
+`(caller#, called#, wall-clock)` as the only way to join an opkura run to the
+bot's own interaction record.
+
+Set `AUTOCALLS_CALL_TRANSPORT=sip` and Twilio INVITEs the LiveKit SIP host
+directly instead:
+
+```
+From: +12202206062
+To:   sip:1205@581mqcm8zvu.sip.livekit.cloud:5060
+        ?X-Is-Test=1
+        &X-Opkura-Session-Id=<session>
+        &X-VirtualNumber=%2B18447331982     ← the scenario `target`
+```
+
+Note where the numbers go. The **user part is LiveKit's trunk identifier**
+(`1205`), not the bot's DID — the DID travels in `X-VirtualNumber`, which the
+inbound trunk maps to the `virtualNumber` attribute:
+
+```json
+"headersToAttributes": { "X-VirtualNumber": "virtualNumber" }
+```
+
+Scenario YAML is **identical** between the two modes: `target` stays E.164 and
+the lint rule still enforces that. Only env changes.
+
+**Job mode requires SIP** and returns `400` under `pstn`, because correlation
+keys on the `X-Opkura-Session-Id` header and a PSTN call cannot carry it.
+
+`X-Opkura-Session-Id` is the correlation key rather than the Twilio Call SID,
+because the SID is minted by the very `calls.create` request that sends the
+INVITE and so cannot appear in it. opkura records session_id → call_sid, which
+closes the loop.
+
+**Verified end to end** on 2026-08-11 (interaction
+`ed845f16-9fe7-4837-a038-903c5fe54f9d`). A probe call landed on the bot and the
+interaction metadata carried:
+
+```
+x-virtualnumber      = +18447331982     # %2B decoded back to '+'
+virtual_number       = +18447331982     # the headersToAttributes mapping
+x-opkura-session-id  = probe-session    # our correlation key
+x-twilio-callsid     = CAe372f045…      # stamped by Twilio itself
+x-is-test            = 1
+ani / caller_number  = +12202206097     # Twilio caller ID preserved
+livekit_sip_call_id  = SCL_EwBjeGdH92R7
+```
+
+So LiveKit percent-decodes the value (no `+`-stripping needed), and header names
+arrive **lowercased** — read `x-virtualnumber`, not `X-VirtualNumber`.
+
+Note `x-twilio-callsid`: Twilio stamps its own Call SID on the INVITE, so the bot
+receives the Twilio SID *and* our session id. That is undocumented by Twilio, so
+treat it as a convenience — `x-opkura-session-id` is the identifier we control.
+
+**LiveKit prerequisite.** The inbound trunk needs both a trunk entry AND a
+**dispatch rule** covering the trunk number. With the trunk alone, LiveKit
+answers `404 Does not match Trunks or Dispatch Rules` and Twilio reports only a
+bare `failed`/0s with no error code. See `scripts/probe_sip_invite.py` for how to
+read the real SIP response.
+
+---
+
+## CLI
+
+### Run one scenario
 
 ```bash
-autocalls run flows/example.yaml
+opkura run clients/_examples/happy-path.yaml
 ```
 
-With verbose logging:
+Auto-lints V2 scenarios before dialing. `--no-lint` skips it while iterating.
+
+### Run a campaign
 
 ```bash
-autocalls run flows/example.yaml -v
+opkura campaign clients/acs/campaigns/auth-sweep.yaml -m 4    # 4 concurrent
 ```
 
-### Watch mode (repeated calls)
-
-Run every 5 minutes for uptime monitoring:
+### Lint without making calls
 
 ```bash
-autocalls watch flows/example.yaml --interval 300
+opkura lint "clients/acs/scenarios/**/*.yaml"
+opkura lint "clients/_examples/*.yaml" --probe    # also dry-runs persona vs LLM
 ```
 
-Run exactly 10 times, 1 minute apart:
+### Generate a Barge Context Document (BCD)
+
+For `mode: llm` barge scenarios — extracts a bot's modules, transition phrases
+and tool-call moments into a markdown file the caller LLM uses to time barges.
+Once per bot:
 
 ```bash
-autocalls watch flows/example.yaml --interval 60 --count 10
+opkura bcg path/to/bot-system-prompt.txt \
+  -o clients/<client>/bargin-context.md
 ```
 
-### View past results
+The BCD is checked into git, hand-editable, and referenced from scenarios via
+`barge_in.bot_context_path`. `--regenerate` overwrites.
+[clients/resurgent/bargin-context.md](clients/resurgent/bargin-context.md) is a
+generated one to look at.
 
-```bash
-autocalls results
+### Everything else
+
+`opkura serve`, `load`, `watch`, `results` — `opkura --help` lists them all.
+
+---
+
+## Job mode
+
+You hand it broken production calls. It reads each one from OSV, writes a
+scenario that reproduces the issue **using that call's own real account data**,
+dials the bot, and correlates the result back to the bot's interaction record.
+
+```
+POST /v1/jobs            → job_id, immediately
+GET  /v1/jobs/{id}/wait  → blocks until status=ready, then read the scenarios
+POST /v1/jobs/{id}/run   → dials
+GET  /v1/jobs/{id}/wait  → status=completed + results[] with a call link each
 ```
 
-Filter by flow name:
+You do not write scenarios and you do not supply test credentials — the account
+number, DOB, SSN last-4, name and registered phone all come from the faulty
+call's own `interaction_metadata`. That is what makes the replication faithful.
 
-```bash
-autocalls results --flow "Penn Credit Auth Check"
-```
+- **[docs/job-api.md](docs/job-api.md)** — the caller's guide. Hand this to
+  anyone who wants to *use* a running instance; it assumes no repo access.
+- **[CLAUDE.md](CLAUDE.md)** — operating it: regions, token refresh, correlation,
+  failure modes.
 
-### Run the server standalone
+**`jobs/` holds real customer PII** — names, account numbers, DOB, SSN last-4,
+lifted from production interactions on purpose. It is gitignored and must stay
+that way. Never commit it, never paste it into a ticket, never move it out of the
+repo. It's regenerated by re-running the job.
 
-If you want to keep the webhook server running separately:
+**Test calls are still recorded as live production interactions.** Opkura sends
+`X-Is-Test: 1` and it is stored, but nothing on the OSV side consumes it yet, so
+post-call processing, analytics and dispositions all fire. Keep jobs small.
 
-```bash
-autocalls serve
-```
+---
 
-## Writing Test Flows
-
-Flows are YAML files that define a scripted conversation. Each step is one turn:
-
-1. **Bot speaks** → Opkura listens and checks against `expect` rules
-2. **Opkura responds** → via `say` (speech), `dtmf` (keypad tones), or both
-
-### Basic example
+## Scenario schema
 
 ```yaml
-name: "Greeting Check"
-target: "+15551234567"   # your bot's phone number
-
-steps:
-  # Step 0: Bot greets, we ask a question
-  - expect:
-      contains_any: ["hello", "welcome", "how can I help"]
-    say: "Hi, what are your business hours?"
-
-  # Step 1: Bot answers, we say thanks
-  - expect:
-      contains_any: ["hours", "open", "monday", "9"]
-    say: "Great, thank you. Goodbye."
-
-  # Step 2: Bot says farewell (no response needed)
-  - expect:
-      contains_any: ["goodbye", "bye", "have a great day"]
-
-success_criteria:
-  all_steps_passed: true
-  max_latency_ms: 5000
+name: "..."                   # required, scenario label
+target: "+1..."               # required, E.164 target
+vars: {...}                   # required, facts the caller knows
+persona: |                    # required, system prompt for the caller LLM
+  ...
+evaluation_prompt: |          # required, system prompt for the evaluator LLM
+  ...
+llm:                          # optional, model + temperature overrides
+  caller_model: gemini-2.5-flash
+  evaluator_model: gemini-2.5-pro
+  temperature: 0.3
+max_turns: 30                 # optional, default 30
+barge_in:                     # optional
+  enabled: true
+  mode: scheduled             # or "llm"
+  triggers: [...]             # required for mode: scheduled
 ```
 
-### DTMF example (IVR / keypad navigation)
+**[opkura/core/lint.py](opkura/core/lint.py) is the spec** — it's what enforces
+the schema, so it's the file to read when a scenario is rejected. Prose version:
+[docs/scenario-yaml-guidelines.md](docs/scenario-yaml-guidelines.md).
 
-```yaml
-name: "IVR Navigation"
-target: "+15551234567"
+Worked examples live in **[clients/_examples/](clients/_examples/)**:
+`happy-path.yaml` (debit card payment, conversational realism),
+`barge-scheduled.yaml` (barges fired at specific turns),
+`barge-llm.yaml` (caller LLM decides when to interrupt). Real per-client
+scenarios and campaigns sit alongside in `clients/<name>/`.
 
-steps:
-  # Bot: "Press 1 for sales, press 2 for support"
-  - expect:
-      contains_any: ["press 1", "press 2", "sales", "support"]
-    dtmf: "1"
+---
 
-  # Bot: "Press 1 to confirm"
-  - expect:
-      contains_any: ["confirm", "press 1"]
-    dtmf: "1"
+## Layout
 
-  # Bot confirms
-  - expect:
-      contains_any: ["confirmed", "connected", "transferring"]
+| Path | Purpose |
+|---|---|
+| [opkura/core/](opkura/core/) | config, models, scenario/campaign loaders, lint |
+| [opkura/engine/](opkura/engine/) | the AI caller — turn-taking, barge modes |
+| [opkura/transport/](opkura/transport/) | Twilio + SIP dialing, media streams, DTMF, VAD |
+| [opkura/orchestrator/](opkura/orchestrator/) | TestRunner, campaign runner, evaluator |
+| [opkura/jobs/](opkura/jobs/) | job mode: api, pipeline, generator, store, workspace |
+| [opkura/services/osv/](opkura/services/osv/) | OSV client (metadata, transcript, prompt, interactions) |
+| [opkura/llm/](opkura/llm/) | `LLMClient` protocol + providers |
+| [opkura/bcg/](opkura/bcg/) | Barge Context Document generator |
+| [opkura/persistence/](opkura/persistence/) | result store + per-call log folders |
+| [opkura/cli/](opkura/cli/) | the `opkura` command |
+| [clients/](clients/) | hand-written scenarios and campaigns, per client |
 
-success_criteria:
-  all_steps_passed: true
-  max_latency_ms: 5000
-```
+## Logs
 
-### Mixed speech + DTMF
-
-A single step can have both `say` and `dtmf`:
-
-```yaml
-  - expect:
-      contains_any: ["enter your account number"]
-    say: "Sure, let me enter it now"
-    dtmf: "123456"
-```
-
-### Flow reference
-
-#### Step fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `expect` | object | What we expect the bot to say (optional) |
-| `expect.contains_any` | list[str] | Pass if bot's speech contains ANY of these (case-insensitive) |
-| `expect.contains_all` | list[str] | Pass if bot's speech contains ALL of these |
-| `expect.not_contains` | list[str] | Pass if bot's speech contains NONE of these |
-| `say` | string | Text to speak via TTS (optional) |
-| `dtmf` | string | DTMF digits to send: `0-9`, `*`, `#`, `A-D`, `w` for 0.5s pause (optional) |
-| `timeout_ms` | int | Max time to wait for bot to speak (default: 10000) |
-
-#### Top-level fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Test name (shown in results) |
-| `target` | string | Phone number to call (E.164 format: `+1...`) |
-| `steps` | list | Conversation steps |
-| `success_criteria.all_steps_passed` | bool | Require all steps to pass (default: true) |
-| `success_criteria.max_latency_ms` | int | Max acceptable response latency (default: 5000) |
-
-## CLI Reference
+Every call writes a folder — `logs/clients/<client>/…/call-<slug>-<utc>-<id>/`
+for hand-written runs, `logs/jobs/<job_id>/scenarios/call-…/` for job mode:
 
 ```
-autocalls run <flow.yaml> [-v]              Run a single test flow
-autocalls watch <flow.yaml> [-i SEC] [-n N] Run repeatedly (interval/count)
-autocalls results [-f NAME] [-n LIMIT]      View past results
-autocalls serve [-v]                        Run webhook server standalone
+scenario.yaml           snapshot of the input
+rendered_persona.txt    persona after Jinja2 + BCD application
+rendered_eval.txt       evaluation prompt after Jinja2
+transcript.json         structured turns (speaker, text, ms, barge fields)
+transcript.txt          human-readable transcript with [BARGE] markers
+evaluation.json         evaluator verdict (overall_passed, criteria, metrics)
+llm_calls.json          every caller + evaluator LLM call (input/output/latency)
+metadata.json           call_sid, duration, p50/p95/max latencies, tokens
+bot.wav, caller.wav     mulaw → PCM 16-bit WAV recordings
+debug.log               per-call logs captured from the `opkura` logger
 ```
 
-## Project Structure
+## Testing
 
-```
-opkura/
-├── autocalls/
-│   ├── cli.py          # Typer CLI (run, watch, results, serve)
-│   ├── config.py       # Pydantic settings from .env
-│   ├── models.py       # Flow, CallResult, StepResult
-│   ├── stt.py          # Deepgram streaming STT (mulaw → text)
-│   ├── tts.py          # Deepgram TTS (text → mulaw)
-│   ├── dtmf.py         # DTMF tone generator (mulaw 8kHz)
-│   ├── flow.py         # Conversation state machine
-│   ├── stream.py       # Twilio Media Stream WebSocket handler
-│   ├── call.py         # Twilio outbound call management
-│   ├── server.py       # FastAPI webhooks + WS endpoints
-│   ├── runner.py       # Test orchestrator
-│   └── store.py        # SQLite result storage
-├── flows/
-│   ├── example.yaml    # Basic greeting flow
-│   └── ivr_booking.yaml# IVR with DTMF example
-├── pyproject.toml
-├── .env.example
-└── .gitignore
+```bash
+pytest tests/ -q                          # unit + integration, no live calls
+RUN_LIVE=1 pytest tests/e2e/test_smoke.py  # live, against your configured target
 ```
 
-## Troubleshooting
+Live tests skip without `RUN_LIVE=1`. Two `tests/unit/core/test_lint.py` CLI
+tests fail on a stock checkout because of ANSI colour capture — pre-existing and
+unrelated to anything you change.
 
-### "Call created but no audio / WebSocket never connects"
+## Backward compatibility
 
-- Verify ngrok is running and the URL in `AUTOCALLS_PUBLIC_URL` matches
-- Check that port 8765 isn't blocked or in use (`lsof -i :8765`)
-- ngrok free plan URLs change on restart — update `.env`
+V1 flow YAMLs in [flows/](flows/) still work via `opkura run flows/foo.yaml`.
+Schema detection is automatic: `persona:` + `evaluation_prompt:` means V2,
+`steps:` means V1. Hybrid YAMLs are rejected at load time.
 
-### "Twilio returns 401 / authentication error"
+## Docs
 
-- Double-check `AUTOCALLS_TWILIO_ACCOUNT_SID` and `AUTOCALLS_TWILIO_AUTH_TOKEN`
-- Ensure the account is active at [console.twilio.com](https://console.twilio.com)
+| Doc | For |
+|---|---|
+| [docs/job-api.md](docs/job-api.md) | **using** job mode over HTTP — hand this out |
+| [CLAUDE.md](CLAUDE.md) | operating job mode: regions, tokens, correlation |
+| [docs/architecture.md](docs/architecture.md) | how the pieces fit |
+| [docs/scenario-yaml-guidelines.md](docs/scenario-yaml-guidelines.md) | writing scenarios |
+| [docs/schema.md](docs/schema.md) | schema reference |
+| [docs/audio-pipeline-and-latency.md](docs/audio-pipeline-and-latency.md) | STT/TTS path, latency budget |
+| [docs/platform-evolution.md](docs/platform-evolution.md) | design decisions and open questions |
 
-### "STT returns empty transcripts"
+## License / Contact
 
-- Verify your Deepgram API key is valid
-- Check that your Deepgram plan includes the Nova-2 model
-- The bot may not be speaking — try with `-v` flag to see raw STT output
-
-### "TTS error / no audio sent to bot"
-
-- Deepgram TTS requires the Aura model — ensure your plan supports it
-- Check verbose logs for HTTP errors from the TTS endpoint
-
-### Steps failing unexpectedly
-
-- Run with `-v` to see exactly what the bot said
-- Adjust `expect.contains_any` keywords to match the bot's actual wording
-- Increase `timeout_ms` if the bot takes long to respond
+Internal.

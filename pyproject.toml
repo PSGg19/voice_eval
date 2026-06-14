@@ -1,15 +1,20 @@
 [project]
-name = "autocalls"
+name = "opkura"
 version = "0.1.0"
-description = "Automated voice AI testing - call your bots, follow flows, verify stability"
-requires-python = ">=3.11"
+description = "Voice-bot test runner — AI-driven caller + scenario lint + BCG"
+# Upper bound is real: transport/vad.py uses `audioop`, a stdlib module removed
+# in 3.13 by PEP 594. Verified on 3.12.
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "twilio>=9.0",
     "fastapi>=0.110",
+    "python-multipart>=0.0.20",
     "uvicorn>=0.27",
     "websockets>=12.0",
     "deepgram-sdk>=3.4",
     "anthropic>=0.40",
+    "google-genai>=0.3.0",
+    "jinja2>=3.1.0",
     "typer>=0.9",
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
@@ -17,13 +22,31 @@ dependencies = [
     "aiosqlite>=0.19",
     "rich>=13.0",
     "httpx>=0.27",
+    # Job-mode state + the per-client prompt cache. Not optional: the server
+    # imports opkura.jobs.api inside a try/except so a missing Redis cannot take
+    # the Twilio webhooks down with it, which means an absent `redis` package
+    # degrades to /v1/jobs returning 404 with only a startup WARNING to explain
+    # it. Declaring it turns a silent 404 into a working feature.
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+# Silero turn-end detection (AUTOCALLS_USE_SILERO_VAD=true). Kept out of the
+# base install because torch is a ~200MB download and the setting defaults to
+# false — opkura runs fine on Deepgram's own turn-end signal. `vad.py` imports
+# these at module level but is itself imported lazily, so the cost is only paid
+# when the feature is switched on.
+vad = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "silero-vad>=5.0",
 ]
 
 [project.scripts]
-autocalls = "autocalls.cli:app"
+opkura = "opkura.cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["autocalls*"]
+include = ["opkura*"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
