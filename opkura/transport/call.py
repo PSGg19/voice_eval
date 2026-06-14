@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 from twilio.rest import Client
 
 from opkura.core.config import Settings
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from opkura.core.region_profile import RegionProfile
 from opkura.transport.dtmf import validate_dtmf_string
 from opkura.transport.sip import build_sip_uri
 
@@ -68,7 +72,9 @@ class CallManager:
         self.settings = settings
         self.client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
 
-    def _resolve_destination(self, to: str, session_id: str) -> tuple[str, dict]:
+    def _resolve_destination(
+        self, to: str, session_id: str, profile: "RegionProfile | None" = None
+    ) -> tuple[str, dict]:
         """Turn the scenario `target` into the `To` value Twilio dials.
 
         Returns `(dial_to, extra_create_kwargs)`.
@@ -99,6 +105,15 @@ class CallManager:
         if self.settings.call_transport != "sip":
             return to, {}
 
+        # Region-wise trunk selection (P3.9): a resolved RegionProfile names
+        # WHICH LiveKit ingress this run dials — India's project for an India
+        # bot, not whatever the global .env happens to hold. No profile means
+        # the deployment default (the historical behaviour, and the V1 flow
+        # path, which has no region concept). Either way the target `to` stays
+        # a HEADER: the trunk number is the user part, never the DID.
+        host = profile.sip_destination_host if profile else self.settings.sip_destination_host
+        trunk = profile.sip_trunk_number if profile else self.settings.sip_trunk_number
+
         headers = {
             **self.settings.parsed_sip_extra_headers,
             self.settings.sip_virtual_number_header: to,
@@ -106,8 +121,8 @@ class CallManager:
             "X-Is-Test": "1",
         }
         dial_to = build_sip_uri(
-            user=self.settings.sip_trunk_number,
-            host=self.settings.sip_destination_host,
+            user=trunk,
+            host=host,
             transport=self.settings.sip_transport,
             headers=headers,
         )
@@ -117,8 +132,15 @@ class CallManager:
             extra["sip_auth_password"] = self.settings.sip_auth_password
         return dial_to, extra
 
-    def make_call(self, to: str, session_id: str) -> str:
-        """Initiate an outbound call. Returns the call SID."""
+    def make_call(
+        self, to: str, session_id: str, profile: "RegionProfile | None" = None
+    ) -> str:
+        """Initiate an outbound call. Returns the call SID.
+
+        `profile` (optional) is the run's resolved RegionProfile: in SIP mode
+        it selects which region's LiveKit ingress receives the INVITE. Omitted,
+        the deployment-default trunk is dialled — the historical behaviour.
+        """
         twiml_url = f"{self.settings.public_url}/twiml/{session_id}"
         status_url = f"{self.settings.public_url}/status/{session_id}"
 
@@ -126,7 +148,7 @@ class CallManager:
         # Everything downstream — TwiML, media streams, the DTMF redirect —
         # is transport-agnostic: Twilio fetches the TwiML at `url` once the
         # SIP call connects, exactly as it does for a PSTN answer.
-        dial_to, extra_kwargs = self._resolve_destination(to, session_id)
+        dial_to, extra_kwargs = self._resolve_destination(to, session_id, profile)
 
         # The exact params we hand to Twilio's REST API — logged BEFORE
         # dialing so a call that fails at create() still leaves a record of

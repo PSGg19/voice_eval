@@ -605,6 +605,45 @@ def _check_assistant_customer_data(data: dict, path: Path) -> tuple[list[LintErr
     return ([], [err]) if allowed else ([err], [])
 
 
+def _check_vars_pii(data: dict, path: Path) -> list[LintError]:
+    """Warn when `vars` values look like they identify a real person.
+
+    The customer-data guard above refuses a *bot* that holds real accounts. This
+    is the other half, and the half that was missing on 2026-08-24: that run used
+    a correct assistant and still leaked, because the scenario's own `vars`
+    carried a real application number which the bot POSTed onward.
+
+    A warning, not an error, because this is a heuristic — it cannot know that a
+    plausible-looking number is real. It is silent on values that are
+    recognisably invented (555 range, repdigits, sequential runs, the Veros test
+    account) so the deliberately-seeded test identities produce no noise, and
+    `allow_customer_data: true` acknowledges it the same way the assistant guard
+    is acknowledged. Findings name the field and mask the value: a lint message
+    ends up in tickets and chat, and a guard that restates the identifier is the
+    leak it exists to prevent.
+    """
+    raw = data.get("vars")
+    if not isinstance(raw, dict) or data.get("allow_customer_data") is True:
+        return []
+
+    from opkura.core.pii_guard import inspect as inspect_pii, is_significant
+
+    findings = inspect_pii(raw)
+    # One unpatterned 4-digit number is not evidence; correlated identifiers are.
+    if not findings or not is_significant(findings):
+        return []
+    detail = "; ".join(f.describe() for f in findings[:6])
+    more = f" (+{len(findings) - 6} more)" if len(findings) > 6 else ""
+    return [_err(
+        "vars_look_like_real_pii",
+        f"`vars` contains {len(findings)} value(s) that look like real customer "
+        f"data: {detail}{more}. These reach the bot and can be written onward to "
+        f"the client's CRM. Use an invented identity (555-01XX phones, "
+        f"example.com emails) or set `allow_customer_data: true` to acknowledge.",
+        path, "vars",
+    )]
+
+
 def _check_assert(data: dict, path: Path) -> list[LintError]:
     """Validate the optional `assert:` block, and reject it where it cannot work.
 
@@ -924,6 +963,7 @@ def lint_scenario(path: Union[str, Path]) -> LintResult:
     # Heuristic / advisory checks land in warnings.
     result.warnings.extend(_check_metrics_not_measured(data, path))
     result.warnings.extend(_check_assert_needs_osv_token(data, path))
+    result.warnings.extend(_check_vars_pii(data, path))
     result.warnings.extend(_check_persona_mentions_output_schema(data, path))
     result.warnings.extend(
         _check_evaluation_mentions_structured_output(data, path)

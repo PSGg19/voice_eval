@@ -48,7 +48,8 @@ import httpx
 
 from opkura.core.config import Settings
 from opkura.core.models import Scenario
-from opkura.core.region import ALLOWED_REGIONS, apply_region
+from opkura.core.region import ALLOWED_REGIONS
+from opkura.core.region_profile import resolve_profile
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +193,12 @@ class TextTransport:
         should say so, rather than depending on an exported variable that
         silently misroutes the whole run.
         """
-        return apply_region(
-            self.settings.text_runtime_base_url,
-            self.scenario.region,
-            what="text_runtime_base_url",
-        )
+        # One resolver for both transports (P3.9): the same call that picks a
+        # SIP trunk for a voice run picks this URL for a text run, so the two
+        # modes can never disagree about what a region means.
+        return resolve_profile(
+            self.scenario.region, self.settings
+        ).text_runtime_base_url
 
     def _region_hint(self, status_code: int, body: str) -> str:
         """Explain a region misroute, which OSV's own 404 wording hides.

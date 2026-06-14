@@ -79,6 +79,30 @@ class Settings(BaseSettings):
     # Env: AUTOCALLS_SIP_AUTH_USERNAME / AUTOCALLS_SIP_AUTH_PASSWORD
     sip_auth_username: str = ""
     sip_auth_password: str = ""
+    # ---- Region-wise SIP trunks (P3.8) --------------------------------
+    # Each region is a different LiveKit project with its own SIP ingress:
+    # dialling an India bot means INVITEing India's project, not the US one
+    # (a US-trunk INVITE for +91… returns "No assistant found" — verified
+    # 31 Aug against livekit-skittl-2's DID +918062123187). The base
+    # sip_destination_host/sip_trunk_number above serve the DEPLOYMENT
+    # DEFAULT region (inferred from osv_base_url), so existing .env files
+    # keep working; these per-region fields add the others. Resolution
+    # happens in core/region_profile.py — nothing below the run boundary
+    # reads these directly. Seeded from env today, from OSV's
+    # telephony_providerconfigs once the V3 store lands.
+    # Env: AUTOCALLS_SIP_DESTINATION_HOST_IN=<project>.sip.livekit.cloud:5060
+    #      AUTOCALLS_SIP_TRUNK_NUMBER_IN=<inbound trunk number>
+    #      AUTOCALLS_SIP_PROVIDER_CONFIG_IN=livekit-skittl-2   (P3.10 hook)
+    sip_destination_host_us: str = ""
+    sip_trunk_number_us: str = ""
+    sip_provider_config_us: str = ""
+    sip_destination_host_in: str = ""
+    sip_trunk_number_in: str = ""
+    sip_provider_config_in: str = ""
+    sip_destination_host_ca: str = ""
+    sip_trunk_number_ca: str = ""
+    sip_provider_config_ca: str = ""
+
     # Extra static correlation headers as `X-A=1,X-B=2`. Merged into the
     # per-call headers opkura already injects (X-Opkura-Session-Id,
     # X-Is-Test), which win on conflict. Only `X-`-prefixed names are
@@ -151,6 +175,23 @@ class Settings(BaseSettings):
             validate_trunk_number(self.sip_trunk_number)
             validate_header_name(self.sip_virtual_number_header)
             parse_header_spec(self.sip_extra_headers)
+            # Per-region trunks (P3.8): validate whatever is set, and refuse a
+            # half-configured region — one field without the other would pass
+            # load and then fail at dial time with a worse message.
+            for suffix in ("us", "in", "ca"):
+                host = getattr(self, f"sip_destination_host_{suffix}")
+                trunk = getattr(self, f"sip_trunk_number_{suffix}")
+                if host:
+                    validate_sip_host(host)
+                if trunk:
+                    validate_trunk_number(trunk)
+                if bool(host) != bool(trunk):
+                    raise ValueError(
+                        f"region '{suffix}' SIP trunk is half-configured: set "
+                        f"both AUTOCALLS_SIP_DESTINATION_HOST_{suffix.upper()} "
+                        f"and AUTOCALLS_SIP_TRUNK_NUMBER_{suffix.upper()}, or "
+                        f"neither"
+                    )
             if self.sip_auth_password and not self.sip_auth_username:
                 raise ValueError(
                     "AUTOCALLS_SIP_AUTH_PASSWORD set without "
@@ -268,6 +309,12 @@ class Settings(BaseSettings):
 
     # Storage
     db_path: str = "opkura.db"
+    # V3 store (P3.1). Default matches docker-compose.yml so
+    # `docker compose up -d postgres` is the entire local setup.
+    # Env: AUTOCALLS_DATABASE_URL=postgresql+psycopg://user:pw@host:5432/db
+    # Default is the machine's native Postgres (shared with the local OSV
+    # stack) so existing SQL tooling can inspect opkura's data directly.
+    database_url: str = "postgresql+psycopg://postgres:root@localhost:5432/opkura"
 
     @property
     def ws_public_url(self) -> str:
