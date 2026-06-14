@@ -1,0 +1,147 @@
+# Local stack. `docker compose up -d` gives you the core: Redis.
+#
+# Postgres is the database and is NOT optional — but on this machine it is the
+# NATIVE server (Homebrew, port 5432, shared with the local OSV stack), not a
+# container, so the developer's existing SQL tooling sees opkura's data with
+# zero extra setup. The app connects via AUTOCALLS_DATABASE_URL (default
+# postgres:root@localhost:5432/opkura) and owns ONLY the `opkura` database
+# there. The `postgres` service below is internal plumbing for the tracing
+# profile (Phoenix/Langfuse need their own store and must not write into the
+# OSV server); it exposes no host port.
+#
+# There is deliberately no SQLite fallback and no in-memory queue: maintaining
+# a second storage implementation forever is a worse cost than running one
+# container and one native server.
+#
+# Observability IS a choice, so it sits behind compose profiles — nothing starts
+# unless you ask for it:
+#
+#   docker compose up -d                          core only
+#   docker compose --profile tracing up -d        + Phoenix and Langfuse
+#   docker compose --profile logs up -d           + Loki and Grafana
+#   docker compose --profile storage up -d        + MinIO (S3-compatible)
+#   docker compose --profile all up -d            everything
+#
+# Artifacts — transcripts, model-call logs, recordings — default to the local
+# filesystem, which is right while a run and whoever reads its results are the
+# same machine. That stops being true the moment the UI serves them: the API is
+# then a different process from the worker that wrote the file. MinIO is here so
+# that switch is a config change and not a migration, and so the S3 path can be
+# exercised locally before it matters.
+
+name: opkura
+
+services:
+  # ----------------------------------------------- tracing-internal postgres
+  # NOT the app's database (that is the native server — see header). This one
+  # exists only so Phoenix and Langfuse have a store of their own; it joins
+  # the compose network under the `tracing`/`all` profiles and publishes no
+  # host port, so it can never be dialled by mistake.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["tracing", "all"]
+    environment:
+      POSTGRES_USER: opkura
+      POSTGRES_PASSWORD: opkura
+      POSTGRES_DB: opkura
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opkura -d opkura"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------- core
+  redis:
+    image: redis:7-alpine
+    # appendonly so a restart does not silently drop queued runs in local dev,
+    # which otherwise looks like a bug in the harness.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------- tracing (opt-in)
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    profiles: ["tracing", "all"]
+    ports:
+      - "6006:6006"   # UI and OTLP/HTTP
+      - "4317:4317"   # OTLP/gRPC
+    environment:
+      # SQLite is Phoenix's default and serialises writes; point it at Postgres
+      # so local traces survive a restart and can take a burst.
+      PHOENIX_SQL_DATABASE_URL: postgresql://opkura:opkura@postgres:5432/phoenix
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  langfuse:
+    image: langfuse/langfuse:3
+    profiles: ["tracing", "all"]
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgresql://opkura:opkura@postgres:5432/langfuse
+      NEXTAUTH_SECRET: local-dev-only-not-a-secret
+      SALT: local-dev-only-not-a-secret
+      NEXTAUTH_URL: http://localhost:3000
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  # ---------------------------------------------------------- logs (opt-in)
+  loki:
+    image: grafana/loki:3.0.0
+    profiles: ["logs", "all"]
+    ports: ["3100:3100"]
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["logs", "all"]
+    ports: ["3001:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    depends_on: [loki]
+
+  # ------------------------------------------------------- storage (opt-in)
+  minio:
+    image: minio/minio:latest
+    profiles: ["storage", "all"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: opkura
+      MINIO_ROOT_PASSWORD: opkura-local-only
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Creates the bucket and exits. Without this the first write fails on a
+  # missing bucket, which reads like a credentials problem and is not.
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["storage", "all"]
+    depends_on:
+      minio: {condition: service_healthy}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 opkura opkura-local-only &&
+      mc mb --ignore-existing local/opkura-artifacts &&
+      echo 'bucket ready: opkura-artifacts'
+      "
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

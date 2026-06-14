@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 import yaml
-from jinja2 import Environment, StrictUndefined, UndefinedError
 
 from .models import (
     METRIC_TYPES, AssertionSpec, BargeInConfig, LLMConfig, MetricSpec, STTConfig,
@@ -13,6 +12,7 @@ from .models import (
     ScheduledTrigger,
 )
 from .region import ALLOWED_REGIONS as _REGION_LIST
+from .rendering import render_sandboxed
 
 REQUIRED_KEYS = {"name", "target", "vars", "persona", "evaluation_prompt"}
 OPTIONAL_KEYS = {
@@ -38,14 +38,10 @@ SCHEDULED_ONLY_KEYS = {"triggers"}
 LLM_ONLY_KEYS = {"decide_every_ms", "bot_context_path"}
 
 
-def _render(env: Environment, template_str: str, vars_data: dict, field_name: str) -> str:
-    template = env.from_string(template_str)
-    try:
-        return template.render(vars=vars_data)
-    except UndefinedError as e:
-        raise ValueError(
-            f"unresolved {{{{ vars.* }}}} reference in {field_name}: {e.message}"
-        ) from e
+# Rendering is delegated to core.rendering (P3.2): the same SandboxedEnvironment
+# renders a template whether it arrived from a YAML file here or over HTTP in
+# the V3 run API. RenderError subclasses ValueError, and its unresolved-variable
+# message keeps the historical format, so callers of `load()` see no change.
 
 
 def _parse_llm(raw: object) -> LLMConfig:
@@ -598,10 +594,9 @@ def load(path: Union[str, Path]) -> Scenario:
     if max_turns < 1:
         raise ValueError(f"`max_turns` must be >= 1, got {max_turns}")
 
-    env = Environment(undefined=StrictUndefined, keep_trailing_newline=True)
-    persona_rendered = _render(env, data["persona"], vars_data, "persona")
-    evaluation_prompt_rendered = _render(
-        env, data["evaluation_prompt"], vars_data, "evaluation_prompt"
+    persona_rendered = render_sandboxed(data["persona"], vars_data, "persona")
+    evaluation_prompt_rendered = render_sandboxed(
+        data["evaluation_prompt"], vars_data, "evaluation_prompt"
     )
 
     barge_in = _parse_barge_in(data.get("barge_in"))

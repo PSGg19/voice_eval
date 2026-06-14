@@ -17,6 +17,7 @@ from opkura.transport.call import CallManager
 from opkura.core.config import Settings
 from opkura.core.log_context import call_id_var
 from opkura.core.region import apply_region, reset_announcements as reset_region_announcements
+from opkura.core.region_profile import resolve_profile
 from opkura.engine.assertions import evaluate_assertions
 from opkura.engine.evaluator import Evaluator
 from opkura.legacy.flow import FlowEngine
@@ -416,7 +417,18 @@ class TestRunner:
                 call_sid: str | None = None
                 try:
                     try:
-                        call_sid = self.call_mgr.make_call(scenario.target, session_id)
+                        # Region-wise trunk selection (P3.8/P3.9). Resolving
+                        # BEFORE dialing means an unconfigured region (India
+                        # trunk coordinates unknown) or a non-compliant
+                        # transport/region pair (PSTN into India — S6) is an
+                        # ERROR result with a message naming the fix, and no
+                        # call is ever placed.
+                        profile = resolve_profile(
+                            scenario.region, self.settings, for_transport=transport
+                        )
+                        call_sid = self.call_mgr.make_call(
+                            scenario.target, session_id, profile
+                        )
                         result.call_sid = call_sid
                         result.status = CallStatus.RINGING
                     except Exception as exc:
