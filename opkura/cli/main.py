@@ -19,7 +19,7 @@ from opkura.legacy.load import LoadTestRunner
 from opkura.core.models import CallResult, LoadTestConfig, LoadTestResult, StepStatus
 from opkura.orchestrator.runner import TestRunner, load_flow
 from opkura.transport.server import app as fastapi_app
-from opkura.persistence.store import ResultStore
+from opkura.db.results import PgResultStore
 
 cli_app = typer.Typer(name="opkura", help="Opkura — voice-bot test runner")
 console = Console()
@@ -27,11 +27,23 @@ console = Console()
 
 def _setup_logging(verbose: bool):
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    # The sink is a choice (P5): LOG_SINK = text | json | loki, resolved by the
+    # connectors layer with graceful fallback to text. Loki is ADDITIVE — the
+    # terminal keeps its readable stream, and the same records also ship to
+    # Loki (queued, off the event loop) for Grafana.
+    import os as _os
+
+    from opkura.connectors.logs import build as _build_log_handler
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(_build_log_handler())
+        if (_os.getenv("LOG_SINK", "").strip().lower() == "loki"
+                and type(root.handlers[0]).__name__ == "LokiQueueHandler"):
+            from opkura.connectors.logs import _text_handler
+
+            root.addHandler(_text_handler())
     # Quiet noisy libs
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -354,7 +366,7 @@ def load(
             _print_load_result(result)
 
             # Persist
-            store = ResultStore(settings.db_path)
+            store = PgResultStore(settings.database_url)
             await store.save_load_result(result)
 
             return result
@@ -403,7 +415,7 @@ def results(
 ):
     """Show past test results."""
     settings = Settings()
-    store = ResultStore(settings.db_path)
+    store = PgResultStore(settings.database_url)
 
     async def _results():
         rows = await store.get_results(flow_name=flow_name, limit=limit)
@@ -499,6 +511,7 @@ def resolve_settings(transport: Optional[str]) -> Settings:
         raise typer.Exit(code=2)
 
 from opkura.cli import campaign as _campaign_module  # noqa: F401, E402
+from opkura.cli import importer as _importer_module  # noqa: F401, E402
 from opkura.cli import lint as _lint_module  # noqa: F401, E402
 from opkura.cli import run as _run_module  # noqa: F401, E402
 

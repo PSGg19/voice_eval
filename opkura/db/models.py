@@ -118,6 +118,11 @@ class VariableSet(Base):
     provenance: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # Asserted by a human reviewer: these values identify no real person.
+    # core/variables.py voids this trust the moment anything is overridden.
+    is_synthetic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _now()
     updated_at: Mapped[datetime] = _now()
 

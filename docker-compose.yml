@@ -51,6 +51,23 @@ services:
       timeout: 3s
       retries: 10
 
+  # Creates the phoenix and langfuse databases and exits. Without this the
+  # tracing services point at databases that never exist and fail to boot,
+  # which reads like an image problem and is not. Idempotent.
+  postgres-init:
+    image: postgres:16-alpine
+    profiles: ["tracing", "all"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PGPASSWORD: opkura
+    entrypoint: >
+      /bin/sh -c "
+      psql -h postgres -U opkura -d opkura -tc \"SELECT 1 FROM pg_database WHERE datname='phoenix'\" | grep -q 1 || psql -h postgres -U opkura -d opkura -c 'CREATE DATABASE phoenix' &&
+      psql -h postgres -U opkura -d opkura -tc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U opkura -d opkura -c 'CREATE DATABASE langfuse' &&
+      echo 'databases ready: phoenix, langfuse'
+      "
+
   # ---------------------------------------------------------------- core
   redis:
     image: redis:7-alpine
@@ -77,20 +94,79 @@ services:
       # so local traces survive a restart and can take a burst.
       PHOENIX_SQL_DATABASE_URL: postgresql://opkura:opkura@postgres:5432/phoenix
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres-init: {condition: service_completed_successfully}
+
+  # Langfuse v3 is a SET: web + worker + ClickHouse (traces live there, not in
+  # Postgres) + S3-compatible blob storage (MinIO) + Redis. Heavier than
+  # Phoenix's single container — that asymmetry is itself a data point for the
+  # tracing-backend choice. All of it stays behind the tracing profile.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    profiles: ["tracing", "all"]
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes: ["clickhousedata:/var/lib/clickhouse"]
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user clickhouse --password clickhouse --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   langfuse:
     image: langfuse/langfuse:3
     profiles: ["tracing", "all"]
-    ports: ["3000:3000"]
-    environment:
+    # Host 3200, not 3000: this machine's llm-studio frontend dev server owns
+    # 3000. LANGFUSE_HOST must match (see .env.local.example).
+    ports: ["3200:3000"]
+    environment: &langfuse-env
       DATABASE_URL: postgresql://opkura:opkura@postgres:5432/langfuse
       NEXTAUTH_SECRET: local-dev-only-not-a-secret
       SALT: local-dev-only-not-a-secret
-      NEXTAUTH_URL: http://localhost:3000
+      # Local-dev constant, deliberately committed — encrypts nothing that
+      # matters on a laptop. Generate a real one for anything shared.
+      ENCRYPTION_KEY: "0d3762d33e33427eaeeb76a3e1f88b31e2f7192cd5f6c69dd53db43a1a4cd7f0"
+      NEXTAUTH_URL: http://localhost:3200
       TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_CONNECTION_STRING: redis://redis:6379
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: opkura
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: opkura-local-only
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      # First-boot provisioning: org, project and API keys exist without any
+      # manual signup. These are the keys .env.local.example references.
+      LANGFUSE_INIT_ORG_ID: opkura
+      LANGFUSE_INIT_ORG_NAME: Opkura
+      LANGFUSE_INIT_PROJECT_ID: opkura-local
+      LANGFUSE_INIT_PROJECT_NAME: opkura-local
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-opkura-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-opkura-local
+      LANGFUSE_INIT_USER_EMAIL: dev@local.test
+      LANGFUSE_INIT_USER_NAME: dev
+      LANGFUSE_INIT_USER_PASSWORD: opkura-local
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres-init: {condition: service_completed_successfully}
+      clickhouse: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    profiles: ["tracing", "all"]
+    environment: *langfuse-env
+    depends_on:
+      postgres-init: {condition: service_completed_successfully}
+      clickhouse: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      redis: {condition: service_healthy}
 
   # ---------------------------------------------------------- logs (opt-in)
   loki:
@@ -112,7 +188,9 @@ services:
   # ------------------------------------------------------- storage (opt-in)
   minio:
     image: minio/minio:latest
-    profiles: ["storage", "all"]
+    # In the tracing profile too: Langfuse v3 requires S3-compatible event
+    # storage, and MinIO is already the local answer to that.
+    profiles: ["storage", "tracing", "all"]
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: opkura
@@ -131,17 +209,19 @@ services:
   # missing bucket, which reads like a credentials problem and is not.
   minio-init:
     image: minio/mc:latest
-    profiles: ["storage", "all"]
+    profiles: ["storage", "tracing", "all"]
     depends_on:
       minio: {condition: service_healthy}
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 opkura opkura-local-only &&
       mc mb --ignore-existing local/opkura-artifacts &&
-      echo 'bucket ready: opkura-artifacts'
+      mc mb --ignore-existing local/langfuse &&
+      echo 'buckets ready: opkura-artifacts, langfuse'
       "
 
 volumes:
   pgdata:
   redisdata:
   miniodata:
+  clickhousedata:

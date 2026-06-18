@@ -19,7 +19,6 @@ dependencies = [
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
     "pyyaml>=6.0",
-    "aiosqlite>=0.19",
     "rich>=13.0",
     "httpx>=0.27",
     # Job-mode state + the per-client prompt cache. Not optional: the server
@@ -37,6 +36,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Observability (Phase 5). Optional by design: TRACING_PROVIDER=none /
+# LOG_SINK=text import none of this — the connectors degrade gracefully when
+# a package is missing, so the base install stays lean.
+observability = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+    "python-logging-loki>=0.3",
+]
 # Silero turn-end detection (AUTOCALLS_USE_SILERO_VAD=true). Kept out of the
 # base install because torch is a ~200MB download and the setting defaults to
 # false — opkura runs fine on Deepgram's own turn-end signal. `vad.py` imports

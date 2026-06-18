@@ -111,6 +111,14 @@ def _loki_handler() -> logging.Handler:
         version="1",
     )
     handler.setFormatter(_JsonFormatter())
+    # The queue listener is a daemon thread; without an orderly stop it races
+    # interpreter shutdown ("could not acquire lock for stderr") AND can drop
+    # the run's final lines. Stop it at exit: drains the queue, then joins.
+    import atexit
+
+    listener = getattr(handler, "listener", None)
+    if listener is not None:
+        atexit.register(listener.stop)
     return handler
 
 
