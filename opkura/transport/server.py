@@ -44,6 +44,19 @@ try:
 except Exception as _exc:  # pragma: no cover - optional subsystem
     logger.warning("V3 API not mounted (%s: %s)", type(_exc).__name__, _exc)
 
+# Prometheus exposition (P5.4) — same choice-gating as the rest of
+# observability: METRICS_ENABLED=true mounts GET /metrics, anything else
+# leaves the route absent entirely.
+import os as _os
+
+if _os.getenv("METRICS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
+    try:
+        from prometheus_client import make_asgi_app as _make_metrics_app
+
+        app.mount("/metrics", _make_metrics_app())
+    except Exception as _exc:  # pragma: no cover - optional subsystem
+        logger.warning("/metrics not mounted (%s: %s)", type(_exc).__name__, _exc)
+
 # In-memory session registry (session_id → session state)
 _sessions: dict[str, dict[str, Any]] = {}
 

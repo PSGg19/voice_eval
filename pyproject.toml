@@ -43,6 +43,11 @@ observability = [
     "opentelemetry-sdk>=1.25",
     "opentelemetry-exporter-otlp-proto-http>=1.25",
     "python-logging-loki>=0.3",
+    "prometheus-client>=0.20",
+]
+# S3/MinIO artifact storage (ARTIFACT_STORE=s3). Local disk needs nothing.
+storage = [
+    "boto3>=1.34",
 ]
 # Silero turn-end detection (AUTOCALLS_USE_SILERO_VAD=true). Kept out of the
 # base install because torch is a ~200MB download and the setting defaults to
