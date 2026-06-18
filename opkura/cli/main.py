@@ -511,6 +511,7 @@ def resolve_settings(transport: Optional[str]) -> Settings:
         raise typer.Exit(code=2)
 
 from opkura.cli import campaign as _campaign_module  # noqa: F401, E402
+from opkura.cli import canary_cmd as _canary_module  # noqa: F401, E402
 from opkura.cli import importer as _importer_module  # noqa: F401, E402
 from opkura.cli import lint as _lint_module  # noqa: F401, E402
 from opkura.cli import run as _run_module  # noqa: F401, E402
