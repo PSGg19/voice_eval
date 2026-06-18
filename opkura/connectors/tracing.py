@@ -30,13 +30,37 @@ DEFAULT = "none"
 
 
 class Tracer(Protocol):
-    """What the run path is allowed to assume exists."""
+    """What the run path is allowed to assume exists.
+
+    Two families. The context managers instrument live code. The `record_*`
+    family (P5.2) writes spans AFTER THE FACT with explicit timestamps —
+    observers learn about a turn or an LLM call once it has happened, and the
+    recorded duration must be the event's own measurement, never inflated by
+    however long the observer took to hear about it.
+    """
 
     @contextmanager
     def span(self, name: str, **attributes: Any) -> Iterator[Any]: ...
 
     @contextmanager
     def generation(self, name: str, *, model: str, **attributes: Any) -> Iterator[Any]: ...
+
+    def begin_trace(self, name: str, *, start_ns: int, **attributes: Any) -> Any: ...
+
+    def record_span(
+        self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+        error: Optional[str] = None, **attributes: Any,
+    ) -> None: ...
+
+    def record_generation(
+        self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+        model: str, error: Optional[str] = None, **attributes: Any,
+    ) -> None: ...
+
+    def end_trace(
+        self, handle: Any, *, end_ns: int, error: Optional[str] = None,
+        **attributes: Any,
+    ) -> None: ...
 
     def flush(self) -> None: ...
 
@@ -50,6 +74,8 @@ class _NoSpan:
 class NoOpTracer:
     """The default. Costs a generator frame and imports nothing."""
 
+    is_noop = True
+
     @contextmanager
     def span(self, name: str, **attributes: Any) -> Iterator[Any]:
         yield _NoSpan()
@@ -58,16 +84,31 @@ class NoOpTracer:
     def generation(self, name: str, *, model: str, **attributes: Any) -> Iterator[Any]:
         yield _NoSpan()
 
+    def begin_trace(self, name: str, *, start_ns: int, **attributes: Any) -> Any:
+        return _NoSpan()
+
+    def record_span(self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+                    error: Any = None, **attributes: Any) -> None: ...
+
+    def record_generation(self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+                          model: str, error: Any = None, **attributes: Any) -> None: ...
+
+    def end_trace(self, handle: Any, *, end_ns: int, error: Any = None,
+                  **attributes: Any) -> None: ...
+
     def flush(self) -> None: ...
 
 
 class _OtelTracer:
     """Wraps a real TracerProvider. Only constructed when a backend is on."""
 
+    is_noop = False
+
     def __init__(self, provider: Any) -> None:
         from opentelemetry import trace
 
         self._provider = provider
+        self._trace_api = trace
         self._tracer = trace.get_tracer("opkura", tracer_provider=provider)
 
     @contextmanager
@@ -87,6 +128,54 @@ class _OtelTracer:
             **{"openinference.span.kind": "LLM", "llm.model_name": model, **attributes},
         ) as s:
             yield s
+
+    # ---- after-the-fact recording (P5.2) --------------------------------
+    # Spans are created with explicit start_time and closed with explicit
+    # end_time, both from the EVENT's own clock — the observer's processing
+    # time never appears in a duration.
+
+    @staticmethod
+    def _set(span: Any, attributes: dict, error: Optional[str]) -> None:
+        for k, v in attributes.items():
+            if v is not None:
+                span.set_attribute(k, v)
+        if error:
+            from opentelemetry.trace import Status, StatusCode
+
+            span.set_status(Status(StatusCode.ERROR, error))
+            span.set_attribute("error.message", error)
+
+    def begin_trace(self, name: str, *, start_ns: int, **attributes: Any) -> Any:
+        span = self._tracer.start_span(name, start_time=start_ns)
+        self._set(span, attributes, None)
+        return span
+
+    def record_span(
+        self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+        error: Optional[str] = None, **attributes: Any,
+    ) -> None:
+        ctx = self._trace_api.set_span_in_context(parent) if parent is not None else None
+        span = self._tracer.start_span(name, context=ctx, start_time=start_ns)
+        self._set(span, attributes, error)
+        span.end(end_time=end_ns)
+
+    def record_generation(
+        self, name: str, *, parent: Any, start_ns: int, end_ns: int,
+        model: str, error: Optional[str] = None, **attributes: Any,
+    ) -> None:
+        # OpenInference kind=LLM is what renders as a generation in Phoenix
+        # and maps onto Langfuse's observation model over plain OTLP.
+        self.record_span(
+            name, parent=parent, start_ns=start_ns, end_ns=end_ns, error=error,
+            **{"openinference.span.kind": "LLM", "llm.model_name": model, **attributes},
+        )
+
+    def end_trace(
+        self, handle: Any, *, end_ns: int, error: Optional[str] = None,
+        **attributes: Any,
+    ) -> None:
+        self._set(handle, attributes, error)
+        handle.end(end_time=end_ns)
 
     def flush(self) -> None:
         try:

@@ -566,6 +566,19 @@ def load(path: Union[str, Path]) -> Scenario:
     if not isinstance(data, dict):
         raise ValueError(f"scenario file {path} must contain a YAML mapping at top level")
 
+    return parse_scenario_data(data, source_path=str(path))
+
+
+def parse_scenario_data(
+    data: dict, *, source_path: Optional[str] = None
+) -> Scenario:
+    """Everything `load()` does after the YAML parse, on a plain mapping.
+
+    Split out (P3.3) because the V3 run API receives the same mapping as a
+    JSON payload / a `scenarios.body` row — one parser, whichever door the
+    scenario came in through. `source_path` is provenance only, plus the base
+    for resolving a relative `barge_in.bot_context_path`.
+    """
     missing = sorted(REQUIRED_KEYS - data.keys())
     if missing:
         raise ValueError(f"missing required key(s): {', '.join(missing)}")
@@ -620,7 +633,7 @@ def load(path: Union[str, Path]) -> Scenario:
         region=_parse_region(data.get("region")),
         metrics=_parse_metrics(data.get("metrics")),
         assertions=_parse_assert(data.get("assert")),
-        source_path=str(path),
+        source_path=source_path,
     )
     return _apply_bcd(scenario)
 

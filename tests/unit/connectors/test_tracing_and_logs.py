@@ -35,9 +35,15 @@ def test_orchestrator_service_env_vars_are_honoured(monkeypatch, caplog):
     monkeypatch.setenv("PHOENIX_ENABLED", "true")
     with caplog.at_level(logging.WARNING):
         tracer = build_tracer()
-    # opentelemetry is not installed here, so it degrades — the point is that it
-    # *tried*, i.e. PHOENIX_ENABLED alone was enough to select a backend.
-    assert isinstance(tracer, NoOpTracer)
+    # The point is that PHOENIX_ENABLED alone SELECTED a backend. What comes
+    # back depends on the environment: a real tracer when opentelemetry is
+    # installed (it is, since the P5 observability extra landed), or a NoOp
+    # after a logged degradation when it is not. Either proves selection;
+    # a silent NoOp with no warning would mean the flag was ignored.
+    if isinstance(tracer, NoOpTracer):
+        assert any("failed to build" in r.getMessage() for r in caplog.records)
+    else:
+        assert getattr(tracer, "is_noop", True) is False
 
 
 @pytest.mark.parametrize("value", ["none", "nope", ""])

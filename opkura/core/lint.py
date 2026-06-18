@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 import yaml
-from jinja2 import Environment, StrictUndefined, UndefinedError
 
 from opkura.llm.base import detect_provider
 from .live_assistants import lookup as lookup_live_assistant
@@ -76,24 +75,36 @@ def _check_legacy_keys(data: dict, path: Path) -> list[LintError]:
 
 
 def _check_jinja_references(data: dict, path: Path) -> list[LintError]:
+    """Render each template with the scenario's own vars, in the SANDBOX.
+
+    Two fixes over the original raw-Environment version, both real:
+    * a malformed template (`{% if x: %}`) raised TemplateSyntaxError out of
+      lint itself — a linter must report bad input, never crash on it;
+    * lint executed untrusted templates unsandboxed, so linting a hostile
+      scenario ran `{{ ''.__class__.__mro__ }}` for real. Same renderer as
+      the loader and the V3 API now (P3.2): one rule set, one sandbox.
+
+    Codes: the historical `unresolved_jinja` is kept; everything else carries
+    the RenderError's own type (template_syntax, sandbox_violation,
+    template_too_large, output_too_large, …).
+    """
+    from .rendering import RenderError, render_sandboxed
+
     errs = []
     vars_data = data.get("vars") if isinstance(data.get("vars"), dict) else {}
-    env = Environment(undefined=StrictUndefined)
     for fld in ("persona", "evaluation_prompt"):
         template_str = data.get(fld)
         if not isinstance(template_str, str):
             continue
         try:
-            env.from_string(template_str).render(vars=vars_data)
-        except UndefinedError as e:
-            errs.append(
-                _err(
-                    "unresolved_jinja",
-                    f"unresolved {{{{ vars.* }}}} reference in {fld}: {e.message}",
-                    path,
-                    field=fld,
-                )
+            render_sandboxed(template_str, vars_data, fld)
+        except RenderError as e:
+            code = (
+                "unresolved_jinja"
+                if e.error_type == "unresolved_variable"
+                else e.error_type
             )
+            errs.append(_err(code, str(e), path, field=fld))
     return errs
 
 
@@ -942,6 +953,24 @@ def lint_scenario(path: Union[str, Path]) -> LintResult:
             )
         )
         return result
+
+    return lint_scenario_data(data, path)
+
+
+# Sentinel path for scenarios that never were a file — API payloads (P3.5).
+API_PATH = Path("<api>")
+
+
+def lint_scenario_data(data: dict, path: Union[str, Path] = API_PATH) -> LintResult:
+    """Every scenario rule, on a plain mapping.
+
+    This is what makes P3.5 "lint as validation" one rule set rather than two:
+    `lint_scenario` (files) and the V3 API's 422 path both land here, so a rule
+    added for one door exists at the other by construction. `path` is only for
+    the report — API callers get the `<api>` sentinel.
+    """
+    path = Path(path)
+    result = LintResult(path=path)
 
     # Schema checks — order matters only for readability of the printed report.
     result.errors.extend(_check_required_keys(data, path))

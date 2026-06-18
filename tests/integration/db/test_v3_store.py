@@ -55,13 +55,16 @@ def test_every_model_round_trips(migrated_engine):
             post_call_enabled=False,
         )
         vs = VariableSet(
-            name="sbi-defaults", client="sbi",
+            name=f"sbi-defaults-{uuid.uuid4().hex[:8]}", client="sbi",
             vars={"customer_name": "Test"}, provenance={"customer_name": "example"},
         )
         s.add(vs)
         s.flush()
         scen = Scenario(
-            key="sbi/yono-general/tool-multihop-routing", version=1,
+            # uuid-suffixed: the importer test loads the REAL corpus into the
+            # same session-scoped DB, which owns the real sbi/… keys at v1.
+            key=f"sbi/yono-general/tool-multihop-routing-{uuid.uuid4().hex[:8]}",
+            version=1,
             body={"persona": "You are …", "evaluation_prompt": "Judge …"},
             target_id=target.id, variable_set_id=vs.id,
             source_path="clients/sbi/yono-general/tool-multihop-routing.yaml",

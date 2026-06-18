@@ -35,7 +35,7 @@ def _runner_with(settings_overrides: dict) -> TestRunner:
     settings = Settings(**base, _env_file=None)
     with patch("opkura.orchestrator.runner.CallManager"), \
          patch("opkura.orchestrator.runner.DeepgramTTS"), \
-         patch("opkura.orchestrator.runner.ResultStore"):
+         patch("opkura.orchestrator.runner.PgResultStore"):
         return TestRunner(settings)
 
 

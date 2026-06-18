@@ -17,7 +17,17 @@ from opkura.transport.call import CallManager
 from opkura.core.config import Settings
 from opkura.core.log_context import call_id_var
 from opkura.core.region import apply_region, reset_announcements as reset_region_announcements
-from opkura.core.region_profile import resolve_profile
+from opkura.core.region_profile import default_region, resolve_profile
+from opkura.observers import (
+    BotTurn,
+    CallerTurn,
+    ObservedLLM,
+    RunFinished,
+    RunStarted,
+    build_observers,
+    run_dispatcher,
+)
+from opkura.observers import emit as emit_event
 from opkura.engine.assertions import evaluate_assertions
 from opkura.engine.evaluator import Evaluator
 from opkura.legacy.flow import FlowEngine
@@ -33,7 +43,7 @@ from opkura.core.models import (
 )
 from opkura.core.scenario_loader import load as load_scenario
 from opkura.transport.server import register_session, remove_session
-from opkura.persistence.store import ResultStore
+from opkura.db.results import PgResultStore
 from opkura.transport.stream import MediaStreamSession
 from opkura.transport.text import TextTransport, TextTransportError
 from opkura.transport.tts import DeepgramTTS
@@ -114,7 +124,7 @@ class TestRunner:
         self.settings = settings
         self.call_mgr = CallManager(settings)
         self.tts = DeepgramTTS(api_key=settings.deepgram_api_key)
-        self.store = ResultStore(settings.db_path)
+        self.store = PgResultStore(settings.database_url)
 
     async def run_flow(self, flow: Flow) -> CallResult:
         """Execute a single test flow: make a call, converse, evaluate."""
@@ -210,9 +220,14 @@ class TestRunner:
                 logger.warning("Failed to save recording: %s", exc)
 
             try:
-                await self.store.save_result(result)
+                await self.store.save_result(
+                    result, transport=self.settings.call_transport
+                )
             except Exception as exc:
-                logger.error("Failed to persist result: %s", exc)
+                logger.error(
+                    "Failed to persist result (is Postgres reachable? "
+                    "AUTOCALLS_DATABASE_URL): %s", exc,
+                )
             return result
         finally:
             # v1 bugfix: prevents session-registry leak when make_call raises
@@ -238,6 +253,12 @@ class TestRunner:
         scenario = load_scenario(path)
         return await self._run_v2_scenario(scenario)
 
+    async def run_scenario(self, scenario: Scenario) -> CallResult:
+        """Run an already-parsed V2 scenario. Public entry for callers that
+        hold a Scenario object rather than a file — the V3 run API (P3.3)
+        builds one from a `scenarios.body` row via parse_scenario_data."""
+        return await self._run_v2_scenario(scenario)
+
     async def _run_v2_scenario(self, scenario: Scenario) -> CallResult:
         session_id = uuid.uuid4().hex
         # Phase 2 concurrent-writer fix: set the per-call ContextVar so
@@ -253,8 +274,33 @@ class TestRunner:
         # (and `opkura serve`, which is long-lived) would announce only the first
         # run's routing and then go silent for every scenario after it.
         reset_region_announcements()
+        # Observability lives BESIDE the run (P5): observers are built from the
+        # environment at the boundary; with everything off this installs
+        # nothing and every emit() below is a single ContextVar read.
+        observers = build_observers()
         try:
-            return await self._run_v2_scenario_body(scenario, session_id)
+            with run_dispatcher(observers):
+                emit_event(RunStarted(
+                    run_id=session_id,
+                    scenario_name=scenario.name,
+                    target=scenario.target,
+                    region=scenario.region or default_region(self.settings),
+                    transport=scenario.transport or self.settings.call_transport,
+                ))
+                result: CallResult | None = None
+                try:
+                    result = await self._run_v2_scenario_body(scenario, session_id)
+                    return result
+                finally:
+                    if result is not None:
+                        emit_event(RunFinished(
+                            status=result.status.value,
+                            passed=result.passed,
+                            error=result.error or "",
+                            interaction_uuid=result.interaction_uuid or "",
+                        ))
+                    else:  # body raised/cancelled before producing a result
+                        emit_event(RunFinished(status="error", error="run aborted"))
         finally:
             call_id_var.reset(call_id_token)
 
@@ -322,7 +368,13 @@ class TestRunner:
         try:
             try:
                 api_key = self._api_key_for(caller_model, scenario.llm.provider)
-                llm = get_client(caller_model, api_key, provider=scenario.llm.provider)
+                # ObservedLLM measures each complete_json around the actual
+                # await and emits a Generation event; the engine sees an
+                # identical client surface (last_usage included).
+                llm = ObservedLLM(
+                    get_client(caller_model, api_key, provider=scenario.llm.provider),
+                    role="caller",
+                )
                 engine = AICallerEngine(scenario, llm)
                 engine.attach_logwriter(logwriter)
                 if is_text:
@@ -506,9 +558,14 @@ class TestRunner:
             # the per-call log folder still captures the run state via the
             # finally block.
             try:
-                await self.store.save_result(result)
+                await self.store.save_result(
+                    result, scenario=scenario, transport=transport
+                )
             except Exception as exc:
-                logger.error("Failed to persist result: %s", exc)
+                logger.error(
+                    "Failed to persist result (is Postgres reachable? "
+                    "AUTOCALLS_DATABASE_URL): %s", exc,
+                )
 
             return result
         finally:
@@ -759,10 +816,26 @@ class TestRunner:
             flat = " ".join((text or "").split()) or "(no text)"
             logger.info("%-6s %s%s", speaker, flat, extra)
 
+        turn_counter = {"bot": 0, "caller": 0}
+
+        def record_caller(text: str, dtmf: str = "") -> None:
+            turn_counter["caller"] += 1
+            emit_event(CallerTurn(
+                turn_index=turn_counter["caller"], text=text, dtmf=dtmf,
+            ))
+
         def record_bot(turn) -> None:
             result.transcript.append(
                 TranscriptEntry(speaker="bot", text=turn.text, timestamp_ms=elapsed_ms())
             )
+            turn_counter["bot"] += 1
+            emit_event(BotTurn(
+                turn_index=turn_counter["bot"],
+                text=turn.text or "",
+                module=turn.current_module or "",
+                latency_ms=turn.reasoning_ms,
+                tag_only=not (turn.text or "").strip(),
+            ))
             # Track flow position and tool usage for deterministic assertions.
             # Consecutive duplicates are collapsed: the interesting signal is the
             # *path* through the flow, not how many turns a module held.
@@ -815,6 +888,7 @@ class TestRunner:
                             timestamp_ms=elapsed_ms(),
                         )
                     )
+                    record_caller(_EMPTY_TURN_NUDGE)
                     bot_turn = await transport.send(speech=_EMPTY_TURN_NUDGE)
                     record_bot(bot_turn)
                     continue
@@ -850,6 +924,7 @@ class TestRunner:
                     timestamp_ms=elapsed_ms(),
                 )
             )
+            record_caller(caller_turn.speech or "", caller_turn.dtmf or "")
             say(
                 "CALLER:",
                 caller_turn.speech,
@@ -894,7 +969,7 @@ class TestRunner:
                 eval_model or scenario.llm.evaluator_model or self.settings.evaluator_model
             )
             eval_api_key = self._api_key_for(resolved_model, None)
-            eval_llm = get_client(resolved_model, eval_api_key)
+            eval_llm = ObservedLLM(get_client(resolved_model, eval_api_key), role="evaluator")
             evaluator = Evaluator(
                 evaluation_prompt=scenario.evaluation_prompt_rendered,
                 llm=eval_llm,

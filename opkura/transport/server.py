@@ -32,6 +32,18 @@ try:
 except Exception as _exc:  # pragma: no cover - optional subsystem
     logger.warning("Job API not mounted (%s: %s)", type(_exc).__name__, _exc)
 
+# V3 run API — /v1/runs, /v1/scenarios, /v1/variable-sets, /v1/targets,
+# /v1/run-batches. Same defensive mounting as jobs and for the same reason:
+# a missing DB driver or unreachable Postgres must not take the Twilio
+# webhooks down with it. (Engine creation is lazy — no connection happens
+# here — so "unreachable" only surfaces on the first V3 request.)
+try:
+    from opkura.api import install_v3 as _install_v3
+
+    _install_v3(app)
+except Exception as _exc:  # pragma: no cover - optional subsystem
+    logger.warning("V3 API not mounted (%s: %s)", type(_exc).__name__, _exc)
+
 # In-memory session registry (session_id → session state)
 _sessions: dict[str, dict[str, Any]] = {}
 

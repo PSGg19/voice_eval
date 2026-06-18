@@ -306,9 +306,15 @@ class Settings(BaseSettings):
     server_host: str = "0.0.0.0"
     server_port: int = 8765
     public_url: str = ""  # https://your-domain.ngrok.io
+    # Bearer token for the V3 API (P3.3). Blank = auth off, which is only
+    # acceptable while the server is reachable from localhost alone; anything
+    # public must set it. Sent as `Authorization: Bearer <token>`.
+    # Env: AUTOCALLS_API_TOKEN=...
+    api_token: str = ""
 
-    # Storage
-    db_path: str = "opkura.db"
+    # Storage — Postgres only (the SQLite ResultStore and its db_path are
+    # gone; a stale AUTOCALLS_DB_PATH in a .env is silently ignored, which is
+    # exactly what `extra="ignore"` is for).
     # V3 store (P3.1). Default matches docker-compose.yml so
     # `docker compose up -d postgres` is the entire local setup.
     # Env: AUTOCALLS_DATABASE_URL=postgresql+psycopg://user:pw@host:5432/db
