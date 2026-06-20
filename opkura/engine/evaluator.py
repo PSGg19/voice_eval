@@ -104,7 +104,8 @@ class Evaluator:
         if self._logwriter is None:
             return
         latency_ms = (time.monotonic() - start) * 1000.0
-        usage = getattr(self.llm, "last_usage", None) or {}
+        # Usage rides IN the result (LLMResult, P1.2); None/plain-dict safe.
+        usage = getattr(response, "usage", None) or {}
         # turn=0 marks end-of-call entries; caller turns are 1-indexed.
         self._logwriter.record_llm_call(
             turn=0,

@@ -6,6 +6,25 @@ from typing import Optional, Protocol, runtime_checkable
 _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 
 
+class LLMResult(dict):
+    """The parsed JSON reply, carrying its own token usage (P1.2).
+
+    A dict subclass on purpose: every call site treats the reply as the JSON
+    mapping it is, and `result.usage` rides along for accounting. Usage
+    travels IN the result rather than on a mutable client attribute because
+    the attribute version corrupts token accounting the moment one client is
+    shared across concurrent runs (P1.3) — coroutine B's usage lands on the
+    client between A's await returning and A's read.
+
+    `usage` keys: `input_tokens` / `output_tokens` (either may be None);
+    `{}` when the provider reported nothing.
+    """
+
+    def __init__(self, data: dict, usage: Optional[dict] = None):
+        super().__init__(data)
+        self.usage: dict = usage or {}
+
+
 @runtime_checkable
 class LLMClient(Protocol):
     provider: str
@@ -18,7 +37,7 @@ class LLMClient(Protocol):
         max_tokens: int = 500,
         temperature: float = 0.3,
         thinking_budget: Optional[int] = None,
-    ) -> dict: ...
+    ) -> LLMResult: ...
 
 
 def detect_provider(model: str) -> str:

@@ -229,9 +229,11 @@ class AICallerEngine:
         if self._logwriter is None:
             return
         latency_ms = (time.monotonic() - start) * 1000.0
-        # Sidecar populated by GeminiClient (non-Protocol attribute) — read
-        # defensively so non-Gemini providers without it still work.
-        usage = getattr(self.llm, "last_usage", None) or {}
+        # Usage rides IN the result (LLMResult, P1.2) — call-local by
+        # construction, so a shared client cannot cross-attribute tokens.
+        # Defensive getattr: a failed call passes response=None, and test
+        # doubles may return plain dicts.
+        usage = getattr(response, "usage", None) or {}
         self._logwriter.record_llm_call(
             turn=self.turn_count + 1,
             role="caller",

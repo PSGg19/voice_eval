@@ -74,8 +74,9 @@ class ObservedLLM:
 
     Measurement happens HERE, around the actual await — the observer receives
     finished timestamps and can never stretch them. Everything else proxies
-    through untouched (`last_usage`, `provider`, `model`, …), so the engines
-    cannot tell the difference; that transparency is pinned by test.
+    through untouched (`provider`, `model`, …), so the engines cannot tell
+    the difference; that transparency is pinned by test. Token counts come
+    from the call's own LLMResult (P1.2), never from client state.
     """
 
     def __init__(self, client: Any, role: str):
@@ -88,20 +89,22 @@ class ObservedLLM:
     async def complete_json(self, *args: Any, **kwargs: Any) -> Any:
         started = time.time_ns()
         error: Optional[str] = None
+        result: Any = None
         try:
-            return await self._client.complete_json(*args, **kwargs)
+            result = await self._client.complete_json(*args, **kwargs)
+            return result
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             raise
         finally:
-            usage = getattr(self._client, "last_usage", None) or {}
+            usage = getattr(result, "usage", None) or {}
             emit(
                 Generation(
                     role=self._role,
                     model=getattr(self._client, "model", "") or "",
                     provider=getattr(self._client, "provider", "") or "",
-                    prompt_tokens=usage.get("prompt_tokens"),
-                    completion_tokens=usage.get("completion_tokens"),
+                    prompt_tokens=usage.get("input_tokens"),
+                    completion_tokens=usage.get("output_tokens"),
                     error=error,
                     started_ns=started,
                     ended_ns=time.time_ns(),

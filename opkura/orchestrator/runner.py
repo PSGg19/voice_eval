@@ -370,7 +370,7 @@ class TestRunner:
                 api_key = self._api_key_for(caller_model, scenario.llm.provider)
                 # ObservedLLM measures each complete_json around the actual
                 # await and emits a Generation event; the engine sees an
-                # identical client surface (last_usage included).
+                # identical client surface.
                 llm = ObservedLLM(
                     get_client(caller_model, api_key, provider=scenario.llm.provider),
                     role="caller",

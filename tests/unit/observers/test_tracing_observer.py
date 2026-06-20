@@ -168,17 +168,17 @@ def test_terminal_flush_is_exempt_from_slow_warning(caplog):
 class FakeLLM:
     provider = "fake"
     model = "fake-model"
-    last_usage = None
 
     def __init__(self, fail=False):
         self._fail = fail
 
     async def complete_json(self, *a, **k):
+        from opkura.llm.base import LLMResult
+
         await asyncio.sleep(0)
         if self._fail:
             raise TimeoutError("llm timeout")
-        self.last_usage = {"prompt_tokens": 7, "completion_tokens": 3}
-        return {"ok": True}
+        return LLMResult({"ok": True}, {"input_tokens": 7, "output_tokens": 3})
 
 
 class Recorder:
@@ -198,7 +198,7 @@ def test_observed_llm_is_transparent_and_emits_generation():
         with run_dispatcher([recorder]):
             out = await llm.complete_json("prompt")
         assert out == {"ok": True}
-        assert llm.last_usage == {"prompt_tokens": 7, "completion_tokens": 3}
+        assert out.usage == {"input_tokens": 7, "output_tokens": 3}
 
     asyncio.run(main())
     [gen] = recorder.events
