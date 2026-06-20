@@ -116,7 +116,10 @@ async def test_non_dict_json_raises_value_error(mock_genai, payload):
 
 
 @pytest.mark.asyncio
-async def test_last_usage_populated_from_usage_metadata(mock_genai):
+async def test_usage_travels_in_the_result(mock_genai):
+    """P1.2: token usage is ON the LLMResult, not on the client. The old
+    `last_usage` attribute (whose staleness needed two regression tests) is
+    gone — there is no client state for concurrent runs to race on."""
     usage = MagicMock()
     usage.prompt_token_count = 42
     usage.candidates_token_count = 17
@@ -125,57 +128,58 @@ async def test_last_usage_populated_from_usage_metadata(mock_genai):
     mock_genai.aio.models.generate_content.return_value = response
 
     client = GeminiClient("gemini-2.5-flash", "fake-key")
-    await client.complete_json(system="sys", messages=[{"role": "user", "content": "hi"}])
+    result = await client.complete_json(
+        system="sys", messages=[{"role": "user", "content": "hi"}]
+    )
 
-    assert client.last_usage == {"input_tokens": 42, "output_tokens": 17}
-
-
-@pytest.mark.asyncio
-async def test_last_usage_cleared_on_raise(mock_genai):
-    """Regression: stale last_usage from previous successful call must not leak
-    into a subsequent failed call's audit entry.
-    """
-    # Call 1: success populates last_usage.
-    usage = MagicMock()
-    usage.prompt_token_count = 100
-    usage.candidates_token_count = 50
-    response = _fake_response('{"ok": true}')
-    response.usage_metadata = usage
-    mock_genai.aio.models.generate_content.return_value = response
-
-    client = GeminiClient("gemini-2.5-flash", "fake-key")
-    await client.complete_json(system="sys", messages=[{"role": "user", "content": "hi"}])
-    assert client.last_usage is not None
-
-    # Call 2: generate_content raises (network blip). last_usage must be None,
-    # not the stale {input: 100, output: 50} from call 1.
-    mock_genai.aio.models.generate_content.side_effect = ConnectionError("upstream 500")
-    with pytest.raises(ConnectionError):
-        await client.complete_json(system="sys", messages=[{"role": "user", "content": "hi"}])
-
-    assert client.last_usage is None
+    assert result == {"ok": True}                      # still the JSON mapping
+    assert result.usage == {"input_tokens": 42, "output_tokens": 17}
+    assert not hasattr(client, "last_usage")           # the attribute is GONE
 
 
 @pytest.mark.asyncio
-async def test_last_usage_cleared_when_message_construction_raises(mock_genai):
-    """Tighter version of the stale-state bug: invalidation must happen BEFORE
-    contents/config construction so even pre-SDK errors leave last_usage clean.
-    """
-    # Seed last_usage from a prior successful call.
-    usage = MagicMock()
-    usage.prompt_token_count = 99
-    usage.candidates_token_count = 33
+async def test_missing_usage_metadata_yields_empty_usage(mock_genai):
     response = _fake_response('{"ok": true}')
-    response.usage_metadata = usage
+    response.usage_metadata = None
     mock_genai.aio.models.generate_content.return_value = response
 
     client = GeminiClient("gemini-2.5-flash", "fake-key")
-    await client.complete_json(system="sys", messages=[{"role": "user", "content": "hi"}])
-    assert client.last_usage is not None
+    result = await client.complete_json(
+        system="sys", messages=[{"role": "user", "content": "hi"}]
+    )
+    assert result.usage == {}
 
-    # Next call: malformed message missing 'role' key raises KeyError BEFORE
-    # the SDK is called. last_usage must still be None afterward.
-    with pytest.raises(KeyError):
-        await client.complete_json(system="sys", messages=[{"content": "no role"}])
 
-    assert client.last_usage is None
+@pytest.mark.asyncio
+async def test_usage_isolation_when_one_client_is_shared(mock_genai):
+    """The P1 acceptance property at the provider boundary: N concurrent calls
+    through ONE client each see exactly their own usage, because usage never
+    touches shared state. Interleaving is forced with a sleep inside the SDK
+    double."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    async def fake_generate(**kwargs):
+        calls["n"] += 1
+        mine = calls["n"]
+        await asyncio.sleep(0.001 * (mine % 5))  # force interleaving
+        usage = MagicMock()
+        usage.prompt_token_count = mine
+        usage.candidates_token_count = mine * 10
+        response = _fake_response('{"i": %d}' % mine)
+        response.usage_metadata = usage
+        return response
+
+    mock_genai.aio.models.generate_content.side_effect = fake_generate
+    client = GeminiClient("gemini-2.5-flash", "fake-key")
+
+    async def one_call():
+        result = await client.complete_json(
+            system="s", messages=[{"role": "user", "content": "x"}]
+        )
+        # the usage must belong to THIS reply, not whichever call finished last
+        assert result.usage["input_tokens"] == result["i"]
+        assert result.usage["output_tokens"] == result["i"] * 10
+
+    await asyncio.gather(*(one_call() for _ in range(50)))

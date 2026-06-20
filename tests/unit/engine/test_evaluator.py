@@ -13,9 +13,9 @@ def _mk_evaluator(*responses, temperature: float = 0.3) -> tuple[Evaluator, Asyn
     llm.provider = "gemini"
     llm.model = "gemini-2.5-pro"
     llm.complete_json = AsyncMock(side_effect=list(responses))
-    # AsyncMock auto-creates last_usage as a truthy MagicMock, defeating the
-    # `or {}` fallback in _record_llm_call. Real GeminiClient seeds None.
-    llm.last_usage = None
+    # Plain-dict responses are fine: usage reads come from the response
+    # (LLMResult, P1.2) and fall back to {} — pass an LLMResult when a test
+    # asserts token accounting.
     ev = Evaluator(
         evaluation_prompt="evaluate the call",
         llm=llm,
@@ -298,10 +298,16 @@ async def test_attached_logwriter_records_evaluator_llm_call():
         def record_bot_response_latency(self, ms):
             pass
 
+    from opkura.llm.base import LLMResult
+
+    # Usage rides in the LLMResult (P1.2), not on the client.
     ev, llm = _mk_evaluator(
-        {"overall_passed": True, "overall_reasoning": "ok", "criteria": [], "metrics": {}}
+        LLMResult(
+            {"overall_passed": True, "overall_reasoning": "ok",
+             "criteria": [], "metrics": {}},
+            {"input_tokens": 200, "output_tokens": 80},
+        )
     )
-    llm.last_usage = {"input_tokens": 200, "output_tokens": 80}
     ev.attach_logwriter(StubLogwriter())
 
     await ev.evaluate(_transcript())

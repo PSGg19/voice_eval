@@ -8,6 +8,8 @@ from typing import Optional
 from google import genai
 from google.genai import types
 
+from opkura.llm.base import LLMResult
+
 logger = logging.getLogger(__name__)
 
 _ROLE_MAP = {"user": "user", "assistant": "model", "model": "model"}
@@ -19,12 +21,9 @@ class GeminiClient:
     def __init__(self, model: str, api_key: str):
         self.model = model
         self._client = genai.Client(api_key=api_key)
-        # Populated after each complete_json call from response.usage_metadata.
-        # Sidecar (not in Protocol) so non-Gemini providers don't have to expose it.
-        # NOT safe when one client is shared across concurrent coroutines — the
-        # caller in ai_caller reads it synchronously right after the await
-        # returns, which is only race-free for single-coroutine ownership.
-        self.last_usage: Optional[dict] = None
+        # No mutable per-call state on the client (P1.2): usage travels in the
+        # LLMResult, so one client instance is safe to share across concurrent
+        # runs (P1.3) — there is nothing on it for two coroutines to race on.
 
     async def complete_json(
         self,
@@ -33,14 +32,7 @@ class GeminiClient:
         max_tokens: int = 500,
         temperature: float = 0.3,
         thinking_budget: Optional[int] = None,
-    ) -> dict:
-        # Invalidate BEFORE any work so any raise (message-construction errors,
-        # SDK exceptions, network blips) leaves last_usage definitively None.
-        # The caller in ai_caller reads this synchronously after the await
-        # returns and would otherwise attribute the previous call's tokens
-        # to this failed attempt.
-        self.last_usage = None
-
+    ) -> LLMResult:
         contents = [
             types.Content(
                 role=_ROLE_MAP.get(m["role"], m["role"]),
@@ -73,12 +65,15 @@ class GeminiClient:
             config=config,
         )
 
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            self.last_usage = {
-                "input_tokens": getattr(usage, "prompt_token_count", None),
-                "output_tokens": getattr(usage, "candidates_token_count", None),
+        usage_meta = getattr(response, "usage_metadata", None)
+        usage = (
+            {
+                "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                "output_tokens": getattr(usage_meta, "candidates_token_count", None),
             }
+            if usage_meta is not None
+            else {}
+        )
 
         text = response.text or ""
         try:
@@ -87,4 +82,4 @@ class GeminiClient:
             raise ValueError(f"Gemini returned non-JSON: {text!r}") from e
         if not isinstance(result, dict):
             raise ValueError(f"Gemini returned non-dict JSON: {result!r}")
-        return result
+        return LLMResult(result, usage)

@@ -12,14 +12,13 @@ def mock_llm_client():
     """Async-mocked LLMClient with the same Protocol surface as real providers.
 
     Each test overrides `.complete_json.return_value` (or `.side_effect`) with
-    the response shape it expects. `last_usage` is pre-seeded to None to
-    prevent AsyncMock's auto-generated MagicMock from leaking into recorded
-    token fields (real GeminiClient seeds None at module init).
+    the response shape it expects — a plain dict works (usage reads fall back
+    to `{}`); return an `LLMResult(data, usage)` when a test asserts token
+    accounting (P1.2: usage travels in the result, no client state).
     """
     c = AsyncMock()
     c.provider = "mock"
     c.model = "mock-model"
-    c.last_usage = None
     return c
 
 

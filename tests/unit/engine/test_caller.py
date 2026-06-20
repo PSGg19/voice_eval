@@ -305,11 +305,16 @@ async def test_string_booleans_truthy_paths(value):
 
 @pytest.mark.asyncio
 async def test_logwriter_records_llm_call_with_token_usage():
-    """When the LLM exposes last_usage, the engine forwards tokens to the logwriter."""
+    """Usage rides in the LLMResult (P1.2); the engine forwards it to the
+    logwriter from the reply itself, never from client state."""
+    from opkura.llm.base import LLMResult
+
     llm = _llm_returning(
-        {"speech": "ok", "dtmf": "", "hangup": False, "barge": False}
+        LLMResult(
+            {"speech": "ok", "dtmf": "", "hangup": False, "barge": False},
+            {"input_tokens": 42, "output_tokens": 17},
+        )
     )
-    llm.last_usage = {"input_tokens": 42, "output_tokens": 17, "total_tokens": 59}
 
     recorded = []
 
