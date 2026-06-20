@@ -17,7 +17,8 @@ from opkura.transport.call import CallManager
 from opkura.core.config import Settings
 from opkura.core.log_context import call_id_var
 from opkura.core.region import apply_region, reset_announcements as reset_region_announcements
-from opkura.core.region_profile import default_region, resolve_profile
+from opkura.core.region_profile import resolve_profile
+from opkura.core.run_context import RunContext
 from opkura.observers import (
     BotTurn,
     CallerTurn,
@@ -120,11 +121,45 @@ _EMPTY_TURN_NUDGE = "Hello? Are you still there?"
 
 
 class TestRunner:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Optional[Settings] = None):
+        """`settings=None` (P1.1) is legal for context-driven execution: a
+        fully-ported RunContext supplies the collaborators, and the heavy
+        Settings-backed ones below are built lazily so a text run with fakes
+        never constructs a Twilio client, a Deepgram client, or a DB engine."""
         self.settings = settings
-        self.call_mgr = CallManager(settings)
-        self.tts = DeepgramTTS(api_key=settings.deepgram_api_key)
-        self.store = PgResultStore(settings.database_url)
+        self._call_mgr: Optional[CallManager] = None
+        self._tts: Optional[DeepgramTTS] = None
+        self._store: Optional[PgResultStore] = None
+
+    def _require_settings(self, what: str) -> Settings:
+        if self.settings is None:
+            raise RuntimeError(
+                f"{what} needs Settings — this TestRunner was built without them "
+                f"(context-driven mode); provide the matching RunContext port instead"
+            )
+        return self.settings
+
+    @property
+    def call_mgr(self) -> CallManager:
+        if self._call_mgr is None:
+            self._call_mgr = CallManager(self._require_settings("Twilio dialing"))
+        return self._call_mgr
+
+    @property
+    def tts(self) -> DeepgramTTS:
+        if self._tts is None:
+            self._tts = DeepgramTTS(
+                api_key=self._require_settings("TTS").deepgram_api_key
+            )
+        return self._tts
+
+    @property
+    def store(self) -> PgResultStore:
+        if self._store is None:
+            self._store = PgResultStore(
+                self._require_settings("result persistence").database_url
+            )
+        return self._store
 
     async def run_flow(self, flow: Flow) -> CallResult:
         """Execute a single test flow: make a call, converse, evaluate."""
@@ -253,13 +288,20 @@ class TestRunner:
         scenario = load_scenario(path)
         return await self._run_v2_scenario(scenario)
 
-    async def run_scenario(self, scenario: Scenario) -> CallResult:
+    async def run_scenario(
+        self, scenario: Scenario, ctx: Optional[RunContext] = None
+    ) -> CallResult:
         """Run an already-parsed V2 scenario. Public entry for callers that
         hold a Scenario object rather than a file — the V3 run API (P3.3)
-        builds one from a `scenarios.body` row via parse_scenario_data."""
-        return await self._run_v2_scenario(scenario)
+        builds one from a `scenarios.body` row via parse_scenario_data.
 
-    async def _run_v2_scenario(self, scenario: Scenario) -> CallResult:
+        `ctx` (P1.1) carries the run's resolved config and ports; omitted, it
+        is built here from Settings — this method IS the boundary."""
+        return await self._run_v2_scenario(scenario, ctx)
+
+    async def _run_v2_scenario(
+        self, scenario: Scenario, ctx: Optional[RunContext] = None
+    ) -> CallResult:
         session_id = uuid.uuid4().hex
         # Phase 2 concurrent-writer fix: set the per-call ContextVar so
         # every log record emitted within this scenario's task subtree
@@ -274,6 +316,13 @@ class TestRunner:
         # (and `opkura serve`, which is long-lived) would announce only the first
         # run's routing and then go silent for every scenario after it.
         reset_region_announcements()
+        # The boundary (P1.1): all ambient config is resolved into the
+        # RunContext here; the body below asks the context, not Settings.
+        if ctx is None:
+            ctx = RunContext.from_settings(
+                scenario, self._require_settings("running without a RunContext"),
+                run_id=session_id,
+            )
         # Observability lives BESIDE the run (P5): observers are built from the
         # environment at the boundary; with everything off this installs
         # nothing and every emit() below is a single ContextVar read.
@@ -283,13 +332,13 @@ class TestRunner:
                 emit_event(RunStarted(
                     run_id=session_id,
                     scenario_name=scenario.name,
-                    target=scenario.target,
-                    region=scenario.region or default_region(self.settings),
-                    transport=scenario.transport or self.settings.call_transport,
+                    target=ctx.target,
+                    region=ctx.region,
+                    transport=ctx.transport,
                 ))
                 result: CallResult | None = None
                 try:
-                    result = await self._run_v2_scenario_body(scenario, session_id)
+                    result = await self._run_v2_scenario_body(scenario, session_id, ctx)
                     return result
                 finally:
                     if result is not None:
@@ -305,7 +354,7 @@ class TestRunner:
             call_id_var.reset(call_id_token)
 
     async def _run_v2_scenario_body(
-        self, scenario: Scenario, session_id: str
+        self, scenario: Scenario, session_id: str, ctx: RunContext
     ) -> CallResult:
         result = CallResult(
             id=session_id,
@@ -319,8 +368,8 @@ class TestRunner:
             started_at=datetime.now(timezone.utc),
         )
 
-        caller_model = scenario.llm.caller_model or self.settings.caller_model
-        eval_model = scenario.llm.evaluator_model or self.settings.evaluator_model
+        caller_model = ctx.caller_model
+        eval_model = ctx.evaluator_model
 
         # Logwriter constructed FIRST — before _api_key_for / get_client can
         # raise — so even config errors produce a log folder for triage. The
@@ -348,8 +397,8 @@ class TestRunner:
         # cheaper on text, so the scenario is the right place to say which —
         # while `AUTOCALLS_CALL_TRANSPORT` stays the default for everything that
         # does not care. Validated at lint time (core/lint.py::_check_transport).
-        transport = scenario.transport or self.settings.call_transport
-        if scenario.transport and scenario.transport != self.settings.call_transport:
+        transport = ctx.transport
+        if scenario.transport and self.settings and scenario.transport != self.settings.call_transport:
             logger.info(
                 "scenario pins transport=%s (deployment default is %s)",
                 scenario.transport, self.settings.call_transport,
@@ -360,34 +409,47 @@ class TestRunner:
         is_text = transport == "text"
         stream_session: Optional[MediaStreamSession] = None
         text_transport: Optional[TextTransport] = None
-        # Per-scenario caller voice. Default (None) -> shared self.tts (English).
-        # A scenario may pick a Spanish voice via `tts.model` so the audio the
-        # bot hears is intelligible; that gets its own DeepgramTTS, closed in the
-        # outer finally.
-        call_tts = self.tts
+        # Per-scenario caller voice. None until the VOICE branch needs one —
+        # touching self.tts here would build a Deepgram client for every text
+        # run (and demand Settings a context-driven run doesn't have). The
+        # default is the shared self.tts (English); a scenario may pick a
+        # Spanish voice via `tts.model`, which gets its own DeepgramTTS,
+        # closed in the outer finally.
+        call_tts: Optional[DeepgramTTS] = None
         try:
             try:
-                api_key = self._api_key_for(caller_model, scenario.llm.provider)
+                # Ports first (P1.1): an injected collaborator is used verbatim;
+                # None falls back to the Settings-backed production default.
+                if ctx.ports.caller_llm is not None:
+                    base_llm = ctx.ports.caller_llm
+                else:
+                    api_key = self._api_key_for(caller_model, scenario.llm.provider)
+                    base_llm = get_client(
+                        caller_model, api_key, provider=scenario.llm.provider
+                    )
                 # ObservedLLM measures each complete_json around the actual
                 # await and emits a Generation event; the engine sees an
                 # identical client surface.
-                llm = ObservedLLM(
-                    get_client(caller_model, api_key, provider=scenario.llm.provider),
-                    role="caller",
-                )
+                llm = ObservedLLM(base_llm, role="caller")
                 engine = AICallerEngine(scenario, llm)
                 engine.attach_logwriter(logwriter)
                 if is_text:
                     # No audio path at all: no TTS voice, no media-stream
                     # session, no Twilio. `stream_session` stays None and the
                     # text branch below drives the conversation over HTTP.
-                    text_transport = TextTransport(
-                        settings=self.settings, scenario=scenario, session_id=session_id
-                    )
+                    if ctx.ports.text_transport is not None:
+                        text_transport = ctx.ports.text_transport(scenario, session_id)
+                    else:
+                        text_transport = TextTransport(
+                            settings=self._require_settings("the OSV text transport"),
+                            scenario=scenario,
+                            session_id=session_id,
+                        )
                 else:
+                    call_tts = self.tts
                     if scenario.tts.model:
                         call_tts = DeepgramTTS(
-                            api_key=self.settings.deepgram_api_key,
+                            api_key=self._require_settings("TTS").deepgram_api_key,
                             model=scenario.tts.model,
                         )
                         logger.info("Caller TTS voice override: %s", scenario.tts.model)
@@ -520,7 +582,7 @@ class TestRunner:
             # call is made; pass/fail is derived from call status alone
             # (COMPLETED → pass). Keeps an EvaluationResult so `passed`, the
             # campaign report, and the DB row all stay consistent.
-            if self.settings.skip_evaluation:
+            if ctx.skip_evaluation:
                 connected = result.status == CallStatus.COMPLETED
                 result.evaluation = EvaluationResult(
                     overall_passed=connected,
@@ -543,7 +605,8 @@ class TestRunner:
                 )
                 self._run_assertions(scenario, result)
                 result.evaluation = await self._run_evaluator(
-                    scenario, result, logwriter=logwriter, eval_model=eval_model
+                    scenario, result, logwriter=logwriter, eval_model=eval_model,
+                    ctx=ctx,
                 )
                 if result.evaluation is not None:
                     logger.info(
@@ -558,7 +621,8 @@ class TestRunner:
             # the per-call log folder still captures the run state via the
             # finally block.
             try:
-                await self.store.save_result(
+                store = ctx.ports.result_store if ctx.ports.result_store is not None else self.store
+                await store.save_result(
                     result, scenario=scenario, transport=transport
                 )
             except Exception as exc:
@@ -614,7 +678,9 @@ class TestRunner:
                 logger.warning("logwriter.close failed in outer finally: %s", exc)
             # Close the per-scenario caller TTS (Spanish voice etc.). The shared
             # self.tts is closed once at runner shutdown, so skip it here.
-            if call_tts is not self.tts:
+            # Compare against the raw slot, not the property — the property
+            # BUILDS a client, which a text run must never trigger.
+            if call_tts is not None and call_tts is not self._tts:
                 try:
                     await call_tts.close()
                 except Exception as exc:
@@ -686,6 +752,10 @@ class TestRunner:
     ) -> None:
         """Recover what the text-runtime HTTP response drops.
 
+        Context-driven runs without Settings (P1.1) skip enrichment: there is
+        no OSV base URL or token to fetch with, and enrichment is additive by
+        contract (its absence marks assertions INCONCLUSIVE, never failed).
+
         Two things never make it back through `post_message_web`:
 
         * **`tool_calls`** — the response accepts the field but never fills it,
@@ -701,6 +771,8 @@ class TestRunner:
         unfamiliar payload shape all just leave the result as it was. A
         diagnostic must never be able to fail the run that produced it.
         """
+        if self.settings is None:  # context-driven run: nothing to fetch with
+            return
         osv_url = apply_region(
             self.settings.osv_base_url, scenario.region, what="osv_base_url"
         )
@@ -963,13 +1035,18 @@ class TestRunner:
         result: CallResult,
         logwriter: Optional[CallLogWriter] = None,
         eval_model: Optional[str] = None,
+        ctx: Optional[RunContext] = None,
     ) -> EvaluationResult:
         try:
             resolved_model = (
                 eval_model or scenario.llm.evaluator_model or self.settings.evaluator_model
             )
-            eval_api_key = self._api_key_for(resolved_model, None)
-            eval_llm = ObservedLLM(get_client(resolved_model, eval_api_key), role="evaluator")
+            if ctx is not None and ctx.ports.evaluator_llm is not None:
+                base_eval_llm = ctx.ports.evaluator_llm
+            else:
+                eval_api_key = self._api_key_for(resolved_model, None)
+                base_eval_llm = get_client(resolved_model, eval_api_key)
+            eval_llm = ObservedLLM(base_eval_llm, role="evaluator")
             evaluator = Evaluator(
                 evaluation_prompt=scenario.evaluation_prompt_rendered,
                 llm=eval_llm,
@@ -1067,4 +1144,7 @@ class TestRunner:
         return results
 
     async def close(self):
-        await self.tts.close()
+        # The raw slot, not the property: close() must not BUILD a TTS client
+        # just to close it (and a context-driven runner has none to build).
+        if self._tts is not None:
+            await self._tts.close()
