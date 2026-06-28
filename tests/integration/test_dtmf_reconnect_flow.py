@@ -98,8 +98,14 @@ async def test_end_to_end_dtmf_redirect_round_trip():
         s._in_transition = False
         s._reconnected.set()
 
+    # P1.4: play_dtmf_and_reconnect now runs on a WORKER THREAD (to_thread),
+    # exactly like the real blocking Twilio SDK — so the fake must schedule
+    # its coroutine back onto the loop the thread-safe way, as any real
+    # cross-thread caller would.
+    loop = asyncio.get_running_loop()
+
     def schedule_reconnect(*_args, **_kwargs):
-        asyncio.create_task(simulate_reconnect())
+        asyncio.run_coroutine_threadsafe(simulate_reconnect(), loop)
 
     call_mgr.play_dtmf_and_reconnect.side_effect = schedule_reconnect
 
@@ -164,8 +170,12 @@ async def test_end_to_end_two_consecutive_redirects():
         s._in_transition = False
         s._reconnected.set()
 
+    # play_dtmf_and_reconnect now runs on a worker thread (P1.4, via
+    # asyncio.to_thread) — schedule the coroutine back onto the test's loop.
+    loop = asyncio.get_running_loop()
+
     def schedule_reconnect(*_args, **_kwargs):
-        asyncio.create_task(simulate_reconnect())
+        asyncio.run_coroutine_threadsafe(simulate_reconnect(), loop)
 
     call_mgr.play_dtmf_and_reconnect.side_effect = schedule_reconnect
 

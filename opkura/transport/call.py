@@ -231,6 +231,34 @@ class CallManager:
         except Exception as exc:
             logger.warning("Failed to hang up %s: %s", call_sid, exc)
 
+    # ---- async facades (P1.4) -------------------------------------------
+    # The Twilio SDK is synchronous HTTP; called bare from a coroutine it
+    # blocks the WHOLE event loop for a full round trip per call — measured
+    # saturation around ~450 concurrent. These push the block onto a worker
+    # thread; the sync methods stay for non-async callers.
+
+    async def make_call_async(
+        self, to: str, session_id: str, profile: "RegionProfile | None" = None
+    ) -> str:
+        import asyncio
+
+        return await asyncio.to_thread(self.make_call, to, session_id, profile)
+
+    async def hang_up_async(self, call_sid: str) -> None:
+        import asyncio
+
+        await asyncio.to_thread(self.hang_up, call_sid)
+
+    async def play_dtmf_and_reconnect_async(
+        self, call_sid: str, digits: str, reconnect_ws_url: str
+    ) -> None:
+        import asyncio
+
+        await asyncio.to_thread(
+            self.play_dtmf_and_reconnect,
+            call_sid=call_sid, digits=digits, reconnect_ws_url=reconnect_ws_url,
+        )
+
     def play_dtmf_and_reconnect(
         self, call_sid: str, digits: str, reconnect_ws_url: str
     ):
