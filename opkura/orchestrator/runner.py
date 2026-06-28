@@ -247,7 +247,7 @@ class TestRunner:
         call_sid: str | None = None
         try:
             try:
-                call_sid = self.call_mgr.make_call(flow.target, session_id)
+                call_sid = await self.call_mgr.make_call_async(flow.target, session_id)
                 result.call_sid = call_sid
                 result.status = CallStatus.RINGING
             except Exception as exc:
@@ -261,7 +261,7 @@ class TestRunner:
                 logger.warning("Call timed out after %.0fs", max_duration)
                 result.finish(CallStatus.ERROR, "Call timed out")
                 try:
-                    self.call_mgr.hang_up(call_sid)
+                    await self.call_mgr.hang_up_async(call_sid)
                 except Exception as exc:
                     logger.warning("hang_up failed during timeout cleanup: %s", exc)
 
@@ -297,7 +297,7 @@ class TestRunner:
             remove_session(session_id)
             if call_sid and result.status in (CallStatus.RINGING, CallStatus.IN_PROGRESS):
                 try:
-                    self.call_mgr.hang_up(call_sid)
+                    await self.call_mgr.hang_up_async(call_sid)
                 except Exception as exc:
                     logger.warning("hang_up failed during finally cleanup: %s", exc)
 
@@ -564,7 +564,7 @@ class TestRunner:
                         profile = resolve_profile(
                             scenario.region, self.settings, for_transport=transport
                         )
-                        call_sid = self.call_mgr.make_call(
+                        call_sid = await self.call_mgr.make_call_async(
                             scenario.target, session_id, profile
                         )
                         result.call_sid = call_sid
@@ -582,7 +582,7 @@ class TestRunner:
                             logger.warning("Scenario timed out after %.0fs", max_duration)
                             result.finish(CallStatus.ERROR, "Scenario timed out")
                             try:
-                                self.call_mgr.hang_up(call_sid)
+                                await self.call_mgr.hang_up_async(call_sid)
                             except Exception as exc:
                                 logger.warning("hang_up failed during timeout cleanup: %s", exc)
 
@@ -598,7 +598,7 @@ class TestRunner:
                     # is already exception-safe (logs warning + swallows).
                     if call_sid:
                         try:
-                            self.call_mgr.hang_up(call_sid)
+                            await self.call_mgr.hang_up_async(call_sid)
                         except Exception as exc:
                             logger.warning("hang_up failed during finally cleanup: %s", exc)
 

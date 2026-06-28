@@ -1386,7 +1386,12 @@ class MediaStreamSession:
         transition_started = time.monotonic()
 
         try:
-            self._call_manager.play_dtmf_and_reconnect(
+            # P1.4: the Twilio REST update runs on a worker thread — bare,
+            # it would freeze every other call's audio for the round trip.
+            # to_thread around the SYNC method (not the async facade) keeps
+            # the seam where the DTMF tests fake it.
+            await asyncio.to_thread(
+                self._call_manager.play_dtmf_and_reconnect,
                 call_sid=call_sid,
                 digits=digits,
                 reconnect_ws_url=self._reconnect_ws_url,
