@@ -145,10 +145,15 @@ class TextTransport:
         settings: Settings,
         scenario: Scenario,
         session_id: str,
+        http: Optional[httpx.AsyncClient] = None,
     ) -> None:
         self.settings = settings
         self.scenario = scenario
         self.session_id = session_id
+        # P1.3: an injected client is the worker's SHARED pool — used, never
+        # closed here. Absent, this transport owns (and closes) its own.
+        self._injected_http = http
+        self._owns_http = False
         self.recipient_id = resolve_recipient_id(scenario)
         # Scenario YAML beats the deployment default. `is None` rather than `or`:
         # an explicit `is_test: false` must not fall through to the setting.
@@ -250,15 +255,23 @@ class TextTransport:
             headers["Authorization"] = f"Bearer {self.settings.text_runtime_token}"
         return headers
 
+    def _request_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            self.settings.text_runtime_read_timeout,
+            connect=self.settings.text_runtime_connect_timeout,
+        )
+
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(
-                    self.settings.text_runtime_read_timeout,
-                    connect=self.settings.text_runtime_connect_timeout,
-                ),
-                headers=self._headers(),
-            )
+            if self._injected_http is not None:
+                self._http = self._injected_http
+            else:
+                # Own one only when nothing was injected (P1.3: the runner
+                # shares one pooled client per worker). Headers and timeout
+                # travel PER REQUEST either way — a shared client carries no
+                # run's state.
+                self._http = httpx.AsyncClient()
+                self._owns_http = True
         return self._http
 
     def _payload(self, user_message: str) -> dict[str, Any]:
@@ -343,7 +356,10 @@ class TextTransport:
 
         for attempt in range(1, self.settings.text_runtime_max_retries + 1):
             try:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(
+                    url, json=payload,
+                    headers=self._headers(), timeout=self._request_timeout(),
+                )
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 # Nothing reached the server, so re-sending cannot duplicate a
                 # turn. Worth retrying: the text runtime restarting under
@@ -498,6 +514,8 @@ class TextTransport:
         return await self._post(message)
 
     async def close(self) -> None:
-        if self._http is not None:
+        # Close only what this transport OWNS — the worker's shared pool
+        # outlives every run that borrows it (P1.3).
+        if self._http is not None and self._owns_http:
             await self._http.aclose()
-            self._http = None
+        self._http = None
