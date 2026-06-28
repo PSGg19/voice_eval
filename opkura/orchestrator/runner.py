@@ -16,6 +16,8 @@ from opkura.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS, AICallerEngine
 from opkura.transport.call import CallManager
 from opkura.core.config import Settings
 from opkura.core.log_context import call_id_var
+import httpx
+
 from opkura.core.region import apply_region, reset_announcements as reset_region_announcements
 from opkura.core.region_profile import resolve_profile
 from opkura.core.run_context import RunContext
@@ -130,6 +132,30 @@ class TestRunner:
         self._call_mgr: Optional[CallManager] = None
         self._tts: Optional[DeepgramTTS] = None
         self._store: Optional[PgResultStore] = None
+        # Shared per-worker clients (P1.3). Safe to share because LLM clients
+        # carry no per-call state since P1.2 (usage rides in the LLMResult),
+        # and the HTTP client's headers/timeouts travel per request.
+        self._llm_clients: dict[tuple[str, Optional[str]], object] = {}
+        self._shared_http: Optional[httpx.AsyncClient] = None
+
+    @property
+    def shared_http(self) -> httpx.AsyncClient:
+        """One pooled AsyncClient per worker, with EXPLICIT limits — an
+        unbounded pool hides a concurrency bug until the far end runs out of
+        sockets mid-campaign."""
+        if self._shared_http is None:
+            self._shared_http = httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+            )
+        return self._shared_http
+
+    def _shared_llm(self, model: str, provider: Optional[str]) -> object:
+        """One LLM client per (model, provider) per worker."""
+        key = (model, provider)
+        if key not in self._llm_clients:
+            api_key = self._api_key_for(model, provider)
+            self._llm_clients[key] = get_client(model, api_key, provider=provider)
+        return self._llm_clients[key]
 
     def _require_settings(self, what: str) -> Settings:
         if self.settings is None:
@@ -423,10 +449,7 @@ class TestRunner:
                 if ctx.ports.caller_llm is not None:
                     base_llm = ctx.ports.caller_llm
                 else:
-                    api_key = self._api_key_for(caller_model, scenario.llm.provider)
-                    base_llm = get_client(
-                        caller_model, api_key, provider=scenario.llm.provider
-                    )
+                    base_llm = self._shared_llm(caller_model, scenario.llm.provider)
                 # ObservedLLM measures each complete_json around the actual
                 # await and emits a Generation event; the engine sees an
                 # identical client surface.
@@ -444,6 +467,7 @@ class TestRunner:
                             settings=self._require_settings("the OSV text transport"),
                             scenario=scenario,
                             session_id=session_id,
+                            http=self.shared_http,  # the worker's pool (P1.3)
                         )
                 else:
                     call_tts = self.tts
@@ -1044,8 +1068,7 @@ class TestRunner:
             if ctx is not None and ctx.ports.evaluator_llm is not None:
                 base_eval_llm = ctx.ports.evaluator_llm
             else:
-                eval_api_key = self._api_key_for(resolved_model, None)
-                base_eval_llm = get_client(resolved_model, eval_api_key)
+                base_eval_llm = self._shared_llm(resolved_model, None)
             eval_llm = ObservedLLM(base_eval_llm, role="evaluator")
             evaluator = Evaluator(
                 evaluation_prompt=scenario.evaluation_prompt_rendered,
@@ -1144,7 +1167,10 @@ class TestRunner:
         return results
 
     async def close(self):
-        # The raw slot, not the property: close() must not BUILD a TTS client
-        # just to close it (and a context-driven runner has none to build).
+        # Raw slots, not the properties: close() must not BUILD a client just
+        # to close it (and a context-driven runner has none to build).
         if self._tts is not None:
             await self._tts.close()
+        if self._shared_http is not None:
+            await self._shared_http.aclose()
+            self._shared_http = None
