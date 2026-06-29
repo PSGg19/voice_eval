@@ -516,12 +516,26 @@ class TestRunner:
                 result.finish(CallStatus.ERROR, f"setup failed: {setup_exc}")
 
             if is_text and text_transport is not None:
+                # P1.6 — the wall-clock cap voice already has. The per-request
+                # read timeout (90s) only bounds ONE turn; a runtime that
+                # trickles slow turns, or a turn loop wedged some other way,
+                # held its worker slot forever. The deadline is resolved at
+                # the boundary (RunContext.from_settings); a directly-built
+                # context may leave it None, so fall back to the identical
+                # voice formula rather than running uncapped.
+                deadline_s = ctx.limits.run_deadline_s
+                if deadline_s is None:
+                    per_turn_s = DEFAULT_BOT_TURN_TIMEOUT_MS / 1000
+                    deadline_s = scenario.max_turns * per_turn_s + 30
                 try:
-                    await self._run_text_conversation(
-                        scenario=scenario,
-                        engine=engine,
-                        transport=text_transport,
-                        result=result,
+                    await asyncio.wait_for(
+                        self._run_text_conversation(
+                            scenario=scenario,
+                            engine=engine,
+                            transport=text_transport,
+                            result=result,
+                        ),
+                        timeout=deadline_s,
                     )
                     if result.status not in (
                         CallStatus.COMPLETED,
@@ -529,6 +543,14 @@ class TestRunner:
                         CallStatus.FAILED,
                     ):
                         result.finish(CallStatus.COMPLETED)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "text run exceeded its %.0fs wall-clock deadline", deadline_s
+                    )
+                    result.finish(
+                        CallStatus.ERROR,
+                        f"Run deadline exceeded ({deadline_s:.0f}s wall clock)",
+                    )
                 except TextTransportError as exc:
                     # A soft failure from the text runtime (wrong channel, no
                     # flow config, unreachable host). Fail the run rather than

@@ -96,6 +96,16 @@ class RunContext:
         idempotency_key: str = "",
     ) -> "RunContext":
         """The production boundary: ambient config is read HERE, once."""
+        # P1.6 — the wall-clock cap. Voice already dies at
+        # max_turns × per-turn-timeout + setup buffer; text gets the SAME
+        # deadline so a stalled run cannot hold its slot forever. Imported
+        # here, not at module top: core must not load the engine package
+        # just to define a dataclass.
+        from opkura.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS
+
+        run_deadline_s = (
+            scenario.max_turns * (DEFAULT_BOT_TURN_TIMEOUT_MS / 1000) + 30
+        )
         transport = scenario.transport or settings.call_transport
         region = scenario.region or default_region(settings)
         # URL/trunk bundle for the run. No `for_transport` gate here — the
@@ -113,7 +123,10 @@ class RunContext:
             evaluator_model=scenario.llm.evaluator_model or settings.evaluator_model,
             idempotency_key=idempotency_key,
             vars=dict(scenario.vars or {}),
-            limits=Limits(max_turns=scenario.max_turns),
+            limits=Limits(
+                max_turns=scenario.max_turns,
+                run_deadline_s=run_deadline_s,
+            ),
             ports=ports or Ports(),
             skip_evaluation=settings.skip_evaluation,
         )
