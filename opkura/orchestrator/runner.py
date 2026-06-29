@@ -123,12 +123,25 @@ _EMPTY_TURN_NUDGE = "Hello? Are you still there?"
 
 
 class TestRunner:
-    def __init__(self, settings: Optional[Settings] = None):
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        *,
+        per_run_debug_log: bool = True,
+    ):
         """`settings=None` (P1.1) is legal for context-driven execution: a
         fully-ported RunContext supplies the collaborators, and the heavy
         Settings-backed ones below are built lazily so a text run with fakes
         never constructs a Twilio client, a Deepgram client, or a DB engine."""
         self.settings = settings
+        # P1.5 — one log stream. True only for single-run use (the CLI at
+        # concurrency 1), where a per-run debug.log is genuinely convenient.
+        # Concurrent modes (campaign with workers > 1, the API executor) set
+        # this False: each per-run root FileHandler is O(in-flight runs)
+        # filter work on every record, and the structured LOG_SINK stream
+        # already carries run_id per line. CampaignRunner flips it from
+        # max_concurrency at campaign start.
+        self.per_run_debug_log = per_run_debug_log
         self._call_mgr: Optional[CallManager] = None
         self._tts: Optional[DeepgramTTS] = None
         self._store: Optional[PgResultStore] = None
@@ -411,7 +424,10 @@ class TestRunner:
         # Falls back to flat "logs/" when source_path is missing (test
         # fixtures that construct Scenario directly).
         log_root = _scenario_log_root(scenario)
-        logwriter = CallLogWriter(root=log_root, scenario=scenario, call_id=session_id)
+        logwriter = CallLogWriter(
+            root=log_root, scenario=scenario, call_id=session_id,
+            capture_debug_log=self.per_run_debug_log,
+        )
         # Surface the log folder on the result BEFORE any failure can occur —
         # setup errors (api_key, provider mismatch) shouldn't hide where the
         # debug.log lives.

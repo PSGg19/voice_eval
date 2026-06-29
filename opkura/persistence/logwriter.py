@@ -92,7 +92,14 @@ def _percentile(values: list[float], pct: float) -> Optional[float]:
 class CallLogWriter:
     """Writes one folder per call. Stream-writes as events arrive; finalizes on close."""
 
-    def __init__(self, root: Union[str, Path], scenario: Scenario, call_id: str):
+    def __init__(
+        self,
+        root: Union[str, Path],
+        scenario: Scenario,
+        call_id: str,
+        *,
+        capture_debug_log: bool = True,
+    ):
         # Second-resolution timestamp so name-sort == chronological-sort for
         # same-minute reruns. call_id suffix still guards against the rare
         # same-second collision (parallel runs in Phase 2).
@@ -107,7 +114,21 @@ class CallLogWriter:
         self._log_handler: Optional[logging.FileHandler] = None
         self._closed = False
         self._snapshot_inputs()
-        self._configure_debug_log()
+        if capture_debug_log:
+            self._configure_debug_log()
+        else:
+            # P1.5 — one log stream. In concurrent modes each per-run root
+            # FileHandler makes EVERY log record in the process traverse one
+            # filter per in-flight run (plus root-logger lock contention), so
+            # no handler is attached at all. The shared structured stream
+            # (LOG_SINK=json|loki) already carries run_id on every line;
+            # debug.log stays in the folder shape as a pointer to it.
+            (self.dir / "debug.log").write_text(
+                "per-run debug.log capture is off in concurrent mode.\n"
+                "Logs are on the shared structured stream (LOG_SINK) — "
+                f"filter by run_id={call_id}\n",
+                encoding="utf-8",
+            )
 
     def _snapshot_inputs(self) -> None:
         src = self.scenario.source_path
