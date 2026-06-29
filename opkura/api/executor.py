@@ -98,7 +98,11 @@ class LocalRunnerExecutor:
             body = {**body, "vars": run.vars_snapshot, "region": run.region,
                     "transport": run.transport}
         scenario = parse_scenario_data(body, source_path=f"<run {run_uuid}>")
-        return await TestRunner(self.settings).run_scenario(scenario)
+        # per_run_debug_log=False (P1.5): the API executor is the concurrent
+        # server mode — runs overlap freely, so per-run root FileHandlers are
+        # exactly the contention the phase removes. The structured LOG_SINK
+        # stream carries run_id on every line instead.
+        return await TestRunner(self.settings, per_run_debug_log=False).run_scenario(scenario)
 
     @staticmethod
     def _finish(session: Session, run: Run, *, status: str, error: str = "") -> None:

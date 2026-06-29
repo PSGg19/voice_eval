@@ -77,6 +77,13 @@ class CampaignRunner:
         called directly. Exceptions in the hook are logged but never
         propagate (a UI bug shouldn't break the campaign).
         """
+        # P1.5 — one log stream. At workers > 1 the per-run debug.log
+        # FileHandlers are dropped (every record would traverse one filter per
+        # in-flight run); the structured LOG_SINK stream, which carries run_id
+        # per line, is the campaign's log. A single-worker campaign keeps the
+        # per-run file — it is exactly the single-run CLI case.
+        self.runner.per_run_debug_log = campaign.max_concurrency <= 1
+
         queue: asyncio.Queue[str] = asyncio.Queue()
         for path in campaign.resolved_scenarios:
             queue.put_nowait(path)
