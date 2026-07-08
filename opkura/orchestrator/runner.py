@@ -13,6 +13,7 @@ from typing import Optional
 import yaml
 
 from opkura.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS, AICallerEngine
+from opkura.engine.conversation import ConversationEngine, Termination
 from opkura.transport.call import CallManager
 from opkura.core.config import Settings
 from opkura.core.log_context import call_id_var
@@ -49,6 +50,7 @@ from opkura.transport.server import register_session, remove_session
 from opkura.db.results import PgResultStore
 from opkura.transport.stream import MediaStreamSession
 from opkura.transport.text import TextTransport, TextTransportError
+from opkura.transport.text_adapter import TextFrameAdapter
 from opkura.transport.tts import DeepgramTTS
 
 logger = logging.getLogger(__name__)
@@ -112,14 +114,6 @@ def detect_schema(path: str | Path) -> str:
     raise ValueError(
         f"unknown scenario schema in {path}; expected V1 'steps' or V2 'persona'+'evaluation_prompt'"
     )
-
-
-# How many times to nudge an agent that produced no utterance before giving up.
-# Mirrors what a caller does over voice, where an empty or tag-only bot turn is
-# dead air rather than the end of the call. Two is enough to distinguish "one
-# blank turn" from "this bot has stopped talking".
-_EMPTY_TURN_NUDGE_LIMIT = 2
-_EMPTY_TURN_NUDGE = "Hello? Are you still there?"
 
 
 class TestRunner:
@@ -516,41 +510,54 @@ class TestRunner:
                 result.finish(CallStatus.ERROR, f"setup failed: {setup_exc}")
 
             if is_text and text_transport is not None:
-                # P1.6 — the wall-clock cap voice already has. The per-request
-                # read timeout (90s) only bounds ONE turn; a runtime that
-                # trickles slow turns, or a turn loop wedged some other way,
-                # held its worker slot forever. The deadline is resolved at
-                # the boundary (RunContext.from_settings); a directly-built
-                # context may leave it None, so fall back to the identical
-                # voice formula rather than running uncapped.
+                # P1.6 — the wall-clock cap voice already has, now OWNED by the
+                # conversation engine (P2.2): it covers receive, the persona
+                # LLM and the HTTP send alike. Resolved at the boundary
+                # (RunContext.from_settings); a directly-built context may
+                # leave it None, so fall back to the identical voice formula
+                # rather than running uncapped.
                 deadline_s = ctx.limits.run_deadline_s
                 if deadline_s is None:
                     per_turn_s = DEFAULT_BOT_TURN_TIMEOUT_MS / 1000
                     deadline_s = scenario.max_turns * per_turn_s + 30
+                conversation = ConversationEngine(
+                    scenario, engine, deadline_s=deadline_s
+                )
+                # Live-shared: a crash mid-run still leaves the partial
+                # transcript on the result for triage and enrichment.
+                result.transcript = conversation.transcript
+                result.status = CallStatus.IN_PROGRESS
                 try:
-                    await asyncio.wait_for(
-                        self._run_text_conversation(
-                            scenario=scenario,
-                            engine=engine,
-                            transport=text_transport,
-                            result=result,
-                        ),
-                        timeout=deadline_s,
+                    outcome = await conversation.run(TextFrameAdapter(text_transport))
+                    result.interaction_uuid = (
+                        outcome.interaction_uuid
+                        or text_transport.interaction_uuid
+                        or ""
                     )
-                    if result.status not in (
+                    result.modules_visited = outcome.modules_visited
+                    result.tool_calls = outcome.tool_calls
+                    # D3: only the bot's own reasoning latency feeds the
+                    # per-run latency stats; the HTTP round trip is a separate
+                    # stream and not comparable.
+                    for ms in outcome.reasoning_latencies_ms:
+                        engine.record_bot_response_latency(ms)
+                    if outcome.termination == Termination.DEADLINE:
+                        logger.warning(
+                            "text run exceeded its %.0fs wall-clock deadline",
+                            deadline_s,
+                        )
+                        result.finish(
+                            CallStatus.ERROR,
+                            f"Run deadline exceeded ({deadline_s:.0f}s wall clock)",
+                        )
+                    elif outcome.termination == Termination.CANCELLED:
+                        result.finish(CallStatus.ERROR, "run cancelled")
+                    elif result.status not in (
                         CallStatus.COMPLETED,
                         CallStatus.ERROR,
                         CallStatus.FAILED,
                     ):
                         result.finish(CallStatus.COMPLETED)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "text run exceeded its %.0fs wall-clock deadline", deadline_s
-                    )
-                    result.finish(
-                        CallStatus.ERROR,
-                        f"Run deadline exceeded ({deadline_s:.0f}s wall clock)",
-                    )
                 except TextTransportError as exc:
                     # A soft failure from the text runtime (wrong channel, no
                     # flow config, unreachable host). Fail the run rather than
@@ -911,185 +918,6 @@ class TestRunner:
                 transport.interaction_uuid, exc,
             )
 
-
-    async def _run_text_conversation(
-        self,
-        scenario: Scenario,
-        engine: AICallerEngine,
-        transport: TextTransport,
-        result: CallResult,
-    ) -> None:
-        """Drive a whole conversation over HTTP turns.
-
-        The audio path's version of this loop lives in
-        `stream.py:_conversation_loop` and is entangled with turn detection,
-        barge scheduling and TTS streaming. This one is ~40 lines because an
-        HTTP request/response *is* a turn: there is no turn to detect, nothing
-        to interrupt, and no timing to reconstruct.
-
-        Deliberately duplicated rather than shared with the audio loop —
-        extracting a common driver would mean touching the smart-grace turn
-        detection, and the two most delicate behaviours in the codebase are not
-        worth risking to avoid forty lines.
-        """
-        result.status = CallStatus.IN_PROGRESS
-        convo_start = time.monotonic()
-
-        def elapsed_ms() -> float:
-            return (time.monotonic() - convo_start) * 1000.0
-
-        def say(speaker: str, text: str, extra: str = "") -> None:
-            """Echo a turn to the log stream so the conversation is visible LIVE.
-
-            The bot's prose arrives with the flow config's own newlines and
-            indentation baked in, which would smear one turn across six log
-            lines and make an interleaved campaign run unreadable — so whitespace
-            is collapsed to a single line. The verbatim text is preserved
-            untouched in transcript.txt / transcript.json.
-            """
-            flat = " ".join((text or "").split()) or "(no text)"
-            logger.info("%-6s %s%s", speaker, flat, extra)
-
-        turn_counter = {"bot": 0, "caller": 0}
-
-        def record_caller(text: str, dtmf: str = "") -> None:
-            turn_counter["caller"] += 1
-            emit_event(CallerTurn(
-                turn_index=turn_counter["caller"], text=text, dtmf=dtmf,
-            ))
-
-        def record_bot(turn) -> None:
-            result.transcript.append(
-                TranscriptEntry(speaker="bot", text=turn.text, timestamp_ms=elapsed_ms())
-            )
-            turn_counter["bot"] += 1
-            emit_event(BotTurn(
-                turn_index=turn_counter["bot"],
-                text=turn.text or "",
-                module=turn.current_module or "",
-                latency_ms=turn.reasoning_ms,
-                tag_only=not (turn.text or "").strip(),
-            ))
-            # Track flow position and tool usage for deterministic assertions.
-            # Consecutive duplicates are collapsed: the interesting signal is the
-            # *path* through the flow, not how many turns a module held.
-            if turn.current_module and (
-                not result.modules_visited
-                or result.modules_visited[-1] != turn.current_module
-            ):
-                result.modules_visited.append(turn.current_module)
-            if turn.tool_calls:
-                result.tool_calls.extend(turn.tool_calls)
-            # The text runtime's own reasoning latency. NOT comparable to the
-            # voice path's bot_turn_latency, which includes carrier, STT and TTS.
-            if turn.reasoning_ms is not None:
-                engine.record_bot_response_latency(turn.reasoning_ms)
-            mod = f"  [{turn.current_module}]" if turn.current_module else ""
-            say("BOT:", turn.text, mod)
-
-        bot_turn = await transport.start()
-        result.interaction_uuid = transport.interaction_uuid or ""
-        logger.info(
-            "text conversation started: interaction_uuid=%s module=%s",
-            result.interaction_uuid, bot_turn.current_module,
-        )
-        record_bot(bot_turn)
-
-        # A real caller does not hang up the instant the agent goes quiet — they
-        # say "hello?" and give it another go. Over voice a tag-only or empty bot
-        # turn is just dead air the caller talks through, so the conversation
-        # recovers and the defect is nearly invisible. Ending the run on the first
-        # empty turn made text STRICTER than voice for no good reason, and hid
-        # what was actually happening. So nudge, bounded, then give up.
-        nudges_used = 0
-
-        while True:
-            if not (bot_turn.text or "").strip():
-                if nudges_used < _EMPTY_TURN_NUDGE_LIMIT:
-                    nudges_used += 1
-                    logger.warning(
-                        "bot produced no speech (module=%s, message_type=%s) — "
-                        "nudging as a caller would (%d/%d). A tag-only reply "
-                        "(e.g. bare <LANG:en-US>) looks identical here: the tag "
-                        "is stripped and nothing is left.",
-                        bot_turn.current_module, bot_turn.message_type,
-                        nudges_used, _EMPTY_TURN_NUDGE_LIMIT,
-                    )
-                    result.transcript.append(
-                        TranscriptEntry(
-                            speaker="caller",
-                            text=_EMPTY_TURN_NUDGE,
-                            timestamp_ms=elapsed_ms(),
-                        )
-                    )
-                    record_caller(_EMPTY_TURN_NUDGE)
-                    bot_turn = await transport.send(speech=_EMPTY_TURN_NUDGE)
-                    record_bot(bot_turn)
-                    continue
-                logger.error(
-                    "bot produced no speech %d times in a row (module=%s) — "
-                    "giving up. The bot is emitting turns with no utterance; "
-                    "over voice this is dead air a caller would talk through.",
-                    nudges_used + 1, bot_turn.current_module,
-                )
-                break
-            # Recovered — a later silence gets its own full allowance.
-            nudges_used = 0
-
-            engine.accumulate_bot_speech(bot_turn.text)
-            caller_turn = await engine.end_bot_turn()
-
-            if caller_turn is None:
-                # Empty bot utterance. Over voice the loop would wait for more
-                # audio; here the turn is definitively over, so either the engine
-                # has given up (hangup set by the abandonment counter) or the bot
-                # genuinely said nothing and there is nothing to reply to.
-                logger.warning(
-                    "bot returned no text (module=%s, message_type=%s) — ending",
-                    bot_turn.current_module, bot_turn.message_type,
-                )
-                break
-
-            result.transcript.append(
-                TranscriptEntry(
-                    speaker="caller",
-                    text=caller_turn.speech,
-                    dtmf=caller_turn.dtmf or None,
-                    timestamp_ms=elapsed_ms(),
-                )
-            )
-            record_caller(caller_turn.speech or "", caller_turn.dtmf or "")
-            say(
-                "CALLER:",
-                caller_turn.speech,
-                (f"  [dtmf {caller_turn.dtmf}]" if caller_turn.dtmf else "")
-                + ("  [hangup]" if caller_turn.hangup else ""),
-            )
-
-            if caller_turn.hangup or engine.is_complete:
-                logger.info(
-                    "caller ended conversation after %d turns (hangup=%s)",
-                    engine.turn_count, caller_turn.hangup,
-                )
-                break
-
-            if not (caller_turn.speech or caller_turn.dtmf):
-                # Nothing to send and not a hangup — would post an empty
-                # user_message and re-trigger the greeting path.
-                logger.warning("caller produced an empty non-hangup turn — ending")
-                break
-
-            bot_turn = await transport.send(
-                speech=caller_turn.speech, dtmf=caller_turn.dtmf
-            )
-            record_bot(bot_turn)
-
-        logger.info(
-            "text conversation finished: %d transcript entries, modules=%s, tools=%d",
-            len(result.transcript),
-            " → ".join(result.modules_visited) or "-",
-            len(result.tool_calls),
-        )
 
     async def _run_evaluator(
         self,

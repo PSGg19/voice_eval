@@ -168,79 +168,22 @@ class ConversationEngine:
         def elapsed_ms() -> float:
             return (time.monotonic() - started) * 1000.0
 
-        def remaining() -> Optional[float]:
-            if self.deadline_s is None:
-                return None
-            return self.deadline_s - (time.monotonic() - started)
-
-        await transport.start()
-
-        # State of the bot turn currently being framed.
-        utterance_parts: list[str] = []
-        turn_meta: Optional[BotTurnEnded] = None
         graceful = True
-
         try:
-            while True:
-                budget = remaining()
-                if budget is not None and budget <= 0:
-                    outcome.termination = Termination.DEADLINE
-                    graceful = False
-                    break
+            # The deadline covers the WHOLE drive — start, receive, the
+            # persona LLM, and deliver. Wrapping only receive() would leave a
+            # transport whose SEND hangs (a wedged HTTP POST, a stuck TTS
+            # write) holding the slot forever, which is exactly what P1.6
+            # exists to prevent. Expiry is a cancel, not a graceful end (D5).
+            drive = self._drive(transport, outcome, elapsed_ms)
+            if self.deadline_s is None:
+                graceful = await drive
+            else:
                 try:
-                    if budget is None:
-                        frame = await transport.receive()
-                    else:
-                        frame = await asyncio.wait_for(transport.receive(), budget)
+                    graceful = await asyncio.wait_for(drive, self.deadline_s)
                 except asyncio.TimeoutError:
                     outcome.termination = Termination.DEADLINE
                     graceful = False
-                    break
-
-                if isinstance(frame, ControlStarted):
-                    if frame.interaction_uuid:
-                        self.interaction_uuid = frame.interaction_uuid
-                        outcome.interaction_uuid = frame.interaction_uuid
-                    continue
-                if isinstance(frame, ControlEnded):
-                    outcome.termination = Termination.REMOTE_ENDED
-                    break
-                if isinstance(frame, ControlCancelled):
-                    outcome.termination = Termination.CANCELLED
-                    graceful = False
-                    break
-                if isinstance(frame, BotPartialSpeech):
-                    continue  # informational; barge stays inside the voice stream
-                if isinstance(frame, BotFinalSpeech):
-                    if frame.text:
-                        utterance_parts.append(frame.text)
-                    continue
-                if isinstance(frame, ModuleEntered):
-                    # Collapse consecutive duplicates: the signal is the PATH
-                    # through the flow, not how many turns a module held.
-                    if frame.module and (
-                        not self.modules_visited
-                        or self.modules_visited[-1] != frame.module
-                    ):
-                        self.modules_visited.append(frame.module)
-                    continue
-                if isinstance(frame, ToolCalled):
-                    self.tool_calls.append(frame.payload)
-                    continue
-                if isinstance(frame, BotTurnEnded):
-                    turn_meta = frame
-                    done, graceful = await self._on_bot_turn_ended(
-                        transport, outcome,
-                        utterance=" ".join(utterance_parts).strip(),
-                        meta=turn_meta,
-                        elapsed_ms=elapsed_ms,
-                    )
-                    utterance_parts.clear()
-                    turn_meta = None
-                    if done:
-                        break
-                    continue
-                logger.warning("engine ignoring unknown frame: %r", frame)
         finally:
             await transport.finish(graceful=graceful)
 
@@ -252,6 +195,63 @@ class ConversationEngine:
             " → ".join(self.modules_visited) or "-", len(self.tool_calls),
         )
         return outcome
+
+    async def _drive(
+        self,
+        transport: FrameTransport,
+        outcome: ConversationOutcome,
+        elapsed_ms,
+    ) -> bool:
+        """The frame loop. Returns whether the ending was graceful (D5)."""
+        await transport.start()
+
+        # State of the bot turn currently being framed.
+        utterance_parts: list[str] = []
+
+        while True:
+            frame = await transport.receive()
+
+            if isinstance(frame, ControlStarted):
+                if frame.interaction_uuid:
+                    self.interaction_uuid = frame.interaction_uuid
+                    outcome.interaction_uuid = frame.interaction_uuid
+                continue
+            if isinstance(frame, ControlEnded):
+                outcome.termination = Termination.REMOTE_ENDED
+                return True
+            if isinstance(frame, ControlCancelled):
+                outcome.termination = Termination.CANCELLED
+                return False
+            if isinstance(frame, BotPartialSpeech):
+                continue  # informational; barge stays inside the voice stream
+            if isinstance(frame, BotFinalSpeech):
+                if frame.text:
+                    utterance_parts.append(frame.text)
+                continue
+            if isinstance(frame, ModuleEntered):
+                # Collapse consecutive duplicates: the signal is the PATH
+                # through the flow, not how many turns a module held.
+                if frame.module and (
+                    not self.modules_visited
+                    or self.modules_visited[-1] != frame.module
+                ):
+                    self.modules_visited.append(frame.module)
+                continue
+            if isinstance(frame, ToolCalled):
+                self.tool_calls.append(frame.payload)
+                continue
+            if isinstance(frame, BotTurnEnded):
+                done, graceful = await self._on_bot_turn_ended(
+                    transport, outcome,
+                    utterance=" ".join(utterance_parts).strip(),
+                    meta=frame,
+                    elapsed_ms=elapsed_ms,
+                )
+                utterance_parts.clear()
+                if done:
+                    return graceful
+                continue
+            logger.warning("engine ignoring unknown frame: %r", frame)
 
     async def _on_bot_turn_ended(
         self,
