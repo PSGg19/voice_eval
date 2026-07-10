@@ -318,6 +318,15 @@ class TestRunner:
         """Detect schema and dispatch to V1 or V2 runner."""
         schema = detect_schema(path)
         if schema == "v1":
+            # P2.6 decision: the sync FlowEngine is retained (frozen) for
+            # `opkura load` / `opkura watch`; running a V1 steps file as a
+            # conversational test is deprecated in favour of V2 scenarios.
+            logger.warning(
+                "DEPRECATED: %s is a V1 `steps:` flow. V1 conversational runs "
+                "are frozen — write a V2 scenario (persona + evaluation_prompt) "
+                "instead. V1 remains supported only for `opkura load`/`watch`.",
+                path,
+            )
             return await self.run_flow_file(path)
         scenario = load_scenario(path)
         return await self._run_v2_scenario(scenario)
