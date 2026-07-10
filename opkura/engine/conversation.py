@@ -327,6 +327,14 @@ class ConversationEngine:
                 )
                 outcome.termination = Termination.BOT_SILENCE
                 return True, True
+            # Empty ack: every BotTurnEnded gets exactly one deliver(), even a
+            # frameless one — a wrapped voice stream is parked inside its
+            # end_bot_turn call waiting for THIS turn's answer (P2.4), and
+            # "keep listening" is an answer.
+            await self._deliver_caller(
+                transport, outcome, elapsed_ms,
+                speech="", dtmf="", hangup=False,
+            )
             return False, True
 
         # Bot is speaking again — refill the silence allowance.
@@ -399,5 +407,6 @@ class ConversationEngine:
             frames.append(CallerDTMF(digits=dtmf, ts_ms=elapsed_ms()))
         if hangup:
             frames.append(CallerHangup(reason=reason, ts_ms=elapsed_ms()))
-        if frames:
-            await transport.deliver(frames)
+        # Delivered even when empty: the turn-level ack a wrapped voice
+        # transport synchronises on (see the empty-utterance branch above).
+        await transport.deliver(frames)

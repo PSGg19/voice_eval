@@ -51,6 +51,7 @@ from opkura.db.results import PgResultStore
 from opkura.transport.stream import MediaStreamSession
 from opkura.transport.text import TextTransport, TextTransportError
 from opkura.transport.text_adapter import TextFrameAdapter
+from opkura.transport.voice_adapter import VoiceFrameAdapter
 from opkura.transport.tts import DeepgramTTS
 
 logger = logging.getLogger(__name__)
@@ -444,6 +445,7 @@ class TestRunner:
         # persistence, the finally block — is transport-agnostic and shared.
         is_text = transport == "text"
         stream_session: Optional[MediaStreamSession] = None
+        voice_adapter: Optional[VoiceFrameAdapter] = None
         text_transport: Optional[TextTransport] = None
         # Per-scenario caller voice. None until the VOICE branch needs one —
         # touching self.tts here would build a Deepgram client for every text
@@ -487,8 +489,15 @@ class TestRunner:
                             model=scenario.tts.model,
                         )
                         logger.info("Caller TTS voice override: %s", scenario.tts.model)
+                    # P2.4 — voice is wrapped, not decomposed: the session
+                    # drives the StreamFlowBridge exactly like it drove the
+                    # engine, and the bridge frames the turn cycle for the
+                    # ConversationEngine running alongside (below). Barge-in,
+                    # VAD and DTMF stay inside the session, delegating to the
+                    # same AICallerEngine as before.
+                    voice_adapter = VoiceFrameAdapter(engine)
                     stream_session = MediaStreamSession(
-                        engine=engine,
+                        engine=voice_adapter.bridge,
                         deepgram_api_key=self.settings.deepgram_api_key,
                         tts=call_tts,
                         result=result,
@@ -581,6 +590,16 @@ class TestRunner:
 
             elif stream_session is not None:
                 completion = asyncio.Event()
+                # P2.4: the conversation engine runs alongside the media
+                # session, fed frames by the bridge. It shares the session's
+                # AICallerEngine, so persona history and turn counting are one
+                # ledger. Voice keeps its own transcript inside the session
+                # (richer: barge entries, reaction timing) until Phase 6.
+                conversation = ConversationEngine(scenario, engine)
+                conversation_task = asyncio.create_task(
+                    conversation.run(voice_adapter),
+                    name=f"conversation-{session_id[:8]}",
+                )
                 # FastAPI server runs in a separate thread (cli/main.py:53).
                 # The server thread cannot call completion.set() directly —
                 # asyncio.Event is not thread-safe. Stash this loop so server
@@ -634,6 +653,28 @@ class TestRunner:
                         if result.status not in (CallStatus.COMPLETED, CallStatus.ERROR, CallStatus.FAILED):
                             result.finish(CallStatus.COMPLETED)
                 finally:
+                    # Unblock the conversation engine (the call is over
+                    # however we got here) and collect its outcome. Bounded:
+                    # the engine only has bookkeeping left at this point, so
+                    # a hang would be a bug worth an ERROR-adjacent log, not
+                    # a stuck worker slot.
+                    voice_adapter.transport_closed("call ended")
+                    try:
+                        outcome = await asyncio.wait_for(conversation_task, timeout=10)
+                        # Voice cannot observe module/tool frames live; the
+                        # engine still owns turn counting and termination.
+                        logger.info(
+                            "voice conversation outcome: termination=%s "
+                            "caller_turns=%d", outcome.termination,
+                            outcome.caller_turns,
+                        )
+                    except asyncio.TimeoutError:
+                        conversation_task.cancel()
+                        logger.error(
+                            "conversation engine did not settle after call end"
+                        )
+                    except Exception:
+                        logger.exception("conversation engine crashed on voice")
                     remove_session(session_id)
                     # Always tell Twilio to end the call when V2 control flow
                     # exits — the AI caller engine ends the conversation locally
