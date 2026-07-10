@@ -1,4 +1,19 @@
-"""Conversation flow engine — walks through steps, evaluates bot speech."""
+"""Conversation flow engine — walks through steps, evaluates bot speech.
+
+**Status (decided in V3 Phase 2, P2.6): RETAINED AND FROZEN.**
+
+The sync FlowEngine stays, as-is, for exactly two callers: the `opkura load`
+load-test dialer and `opkura watch` interval runs — both places where a
+scripted, deterministic step walk is the point and an LLM persona would be
+noise and cost. It drives MediaStreamSession directly (the session's `flow`
+slot accepts either this or the V2 StreamFlowBridge); it will never learn
+frames, and no new capability lands here.
+
+V1 conversational testing (`opkura run` on a `steps:` file) is DEPRECATED in
+favour of V2 scenarios — the runner logs a deprecation warning on that path.
+This module's removal is tied to the load-test flow migrating onto V3 runs;
+until then, changes here are bug fixes only.
+"""
 
 from __future__ import annotations
 
