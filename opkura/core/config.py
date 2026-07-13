@@ -322,6 +322,20 @@ class Settings(BaseSettings):
     # stack) so existing SQL tooling can inspect opkura's data directly.
     database_url: str = "postgresql+psycopg://postgres:root@localhost:5432/opkura"
 
+    # ---- distributed execution (P4). The queue is dispatch, never the
+    # record: the Postgres row is written first, always. queue_enabled=False
+    # keeps single-process behaviour possible for CLI/dev work with no Redis.
+    redis_url: str = "redis://localhost:6379/0"
+    queue_enabled: bool = False
+    # Lease: a claimed run must heartbeat within this window or the reaper
+    # reclaims it for another worker. Attempts beyond queue_max_attempts land
+    # in the dead-letter stream with the failure attached.
+    queue_lease_s: float = 30.0
+    queue_max_attempts: int = 3
+    # Admission control (P4.4). Env-gated existence: disabled → the gate is
+    # the historical no-op. Live tuning rides the Redis config hash.
+    admission_enabled: bool = False
+
     @property
     def ws_public_url(self) -> str:
         """Convert https:// public URL to wss:// for WebSocket."""

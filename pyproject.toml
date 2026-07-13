@@ -59,6 +59,12 @@ vad = [
     "numpy>=1.24",
     "silero-vad>=5.0",
 ]
+# Hermetic queue tests (P4): fakeredis stands in for Redis Streams so
+# `pytest tests/` never needs a container; the `-m distributed` two-worker
+# proof runs against the real compose Redis instead.
+test = [
+    "fakeredis>=2.30",
+]
 
 [project.scripts]
 opkura = "opkura.cli.main:main"
