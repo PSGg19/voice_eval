@@ -542,18 +542,17 @@ class TestRunner:
                     scenario, engine, deadline_s=deadline_s
                 )
                 # Live-shared: a crash mid-run still leaves the partial
-                # transcript on the result for triage and enrichment.
+                # transcript, module path and tool calls on the result for
+                # triage and enrichment — proven necessary by the 2026-08-31
+                # Veros probe, where a turn-18 runtime hang (TextTransportError)
+                # skipped the post-run copies and shipped an ERROR result with
+                # modules_visited=[] while the engine knew GREETINGS.
                 result.transcript = conversation.transcript
+                result.modules_visited = conversation.modules_visited
+                result.tool_calls = conversation.tool_calls
                 result.status = CallStatus.IN_PROGRESS
                 try:
                     outcome = await conversation.run(TextFrameAdapter(text_transport))
-                    result.interaction_uuid = (
-                        outcome.interaction_uuid
-                        or text_transport.interaction_uuid
-                        or ""
-                    )
-                    result.modules_visited = outcome.modules_visited
-                    result.tool_calls = outcome.tool_calls
                     # D3: only the bot's own reasoning latency feeds the
                     # per-run latency stats; the HTTP round trip is a separate
                     # stream and not comparable.
@@ -586,6 +585,14 @@ class TestRunner:
                     logger.exception("text conversation crashed")
                     result.finish(CallStatus.ERROR, f"text conversation crashed: {exc}")
                 finally:
+                    # Correlation must survive an errored run — the join key
+                    # is most valuable exactly when the run needs triage.
+                    if not result.interaction_uuid:
+                        result.interaction_uuid = (
+                            conversation.interaction_uuid
+                            or text_transport.interaction_uuid
+                            or ""
+                        )
                     # Deliberately in `finally`, and BEFORE close(): a stalled
                     # or crashed run is exactly when the tag-only diagnosis
                     # matters most. The Veros IB 2.0 hang ends in a ReadTimeout
