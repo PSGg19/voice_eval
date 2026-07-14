@@ -63,7 +63,7 @@ vad = [
 # `pytest tests/` never needs a container; the `-m distributed` two-worker
 # proof runs against the real compose Redis instead.
 test = [
-    "fakeredis>=2.30",
+    "fakeredis[lua]>=2.30",
 ]
 
 [project.scripts]
