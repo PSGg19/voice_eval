@@ -60,7 +60,7 @@ class LeaseManager:
         self.consumer = consumer
         self.lease_ms = int(lease_s * 1000)
 
-    async def acquire(self, run_uuid: uuid_mod.UUID | str) -> bool:
+    async def acquire(self, run_uuid: uuid_mod.UUID | str, *, stage: str = "") -> bool:
         ok = await self.redis.set(
             lease_key(run_uuid), self.consumer, nx=True, px=self.lease_ms
         )
@@ -68,7 +68,7 @@ class LeaseManager:
             await self.redis.xadd(
                 LEASE_HISTORY,
                 {"run_uuid": str(run_uuid), "consumer": self.consumer,
-                 "ts": f"{time.time():.6f}"},
+                 "stage": stage, "ts": f"{time.time():.6f}"},
                 maxlen=100_000, approximate=True,
             )
         return bool(ok)

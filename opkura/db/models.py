@@ -164,8 +164,8 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('created','queued','running','correlating',"
-            "'completed','failed','cancelled')",
+            "status IN ('created','queued','running','evaluating',"
+            "'correlating','completed','failed','cancelled')",
             name="runs_status_check",
         ),
         {"postgresql_partition_by": "RANGE (created_at)"},
@@ -197,6 +197,20 @@ class Run(Base):
     )
     verdict: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # P4.3 — the judge is its own stage. The conversation worker persists
+    # transcript + observations here and frees its slot; the evaluate worker
+    # reads them back on a different process. judge_policy: 'always' |
+    # 'sampled' | 'assertions-only' (failures are always LLM-judged, whatever
+    # the policy — that rule lives in the worker).
+    transcript: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    observations: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    judge_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="always"
     )
     error: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     interaction_uuid: Mapped[str | None] = mapped_column(Text)
