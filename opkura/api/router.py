@@ -301,7 +301,9 @@ def create_run_endpoint(
     session: Session = Depends(get_session),
     state: V3State = Depends(get_state),
 ) -> dict:
-    run, created = create_run(session, state.settings, payload)
+    run, created = create_run(
+        session, state.settings, payload, gate=state.admission_gate
+    )
     if created:
         response.status_code = 201
         background.add_task(state.executor.execute, run.run_uuid)
@@ -370,7 +372,8 @@ def create_batch(
         # refused run must not waste the other 499. Refusals come back in-line.
         try:
             run, created = create_run(
-                session, state.settings, run_payload, batch_id=batch_id
+                session, state.settings, run_payload, batch_id=batch_id,
+                gate=state.admission_gate,
             )
         except Exception as exc:
             session.rollback()  # clear whatever the refused admission left pending
@@ -404,3 +407,37 @@ def _batch_counts(session: Session, batch_id) -> dict[str, int]:
         .group_by(Run.status)
     ).all()
     return {status: count for status, count in rows}
+
+
+# ------------------------------------------------------------------ gauges
+
+@router.get("/queue/gauges")
+async def queue_gauges(state: V3State = Depends(get_state)) -> dict:
+    """P4 exit criterion: budgets observable. Live in-flight gauges per
+    fleet/client/assistant, stage backlog depths, and the admission config in
+    force. Best-effort by design — Redis trouble yields an `error` field, not
+    a 500, because the endpoint exists precisely for the bad days."""
+    from opkura.queue.admission import ExecutionBudget, load_config_async
+    from opkura.queue.streams import LANES, STAGES, StageQueue, connect
+
+    redis = connect(state.settings.redis_url)
+    try:
+        budget = ExecutionBudget(redis)
+        out = await budget.snapshot()
+        out["admission_config"] = (await load_config_async(redis)).__dict__
+        queue = StageQueue(redis)
+        depths: dict = {}
+        try:
+            for stage in STAGES:
+                for lane in LANES:
+                    depths[f"{stage}:{lane}"] = await queue.depth(stage, lane)
+        except Exception as exc:
+            depths = {"error": f"depths unreadable: {exc}"}
+        out["depths"] = depths
+        out["admission_enabled"] = state.settings.admission_enabled
+        return out
+    finally:
+        try:
+            await redis.aclose()
+        except Exception:
+            pass

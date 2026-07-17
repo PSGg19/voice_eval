@@ -225,3 +225,37 @@ def test_sampling_is_deterministic_per_run():
     # roughly the requested fraction across many runs
     hits = sum(sampled_in(uuid.uuid4(), 0.3) for _ in range(2000))
     assert 450 < hits < 750
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_defers_without_burning_an_attempt(
+    migrated_engine, queue
+):
+    """P4.4: no slot → the entry is re-queued with the SAME attempt after the
+    lease is released, and the row is untouched."""
+    from opkura.queue.admission import CONFIG_HASH, ExecutionBudget
+
+    run_uuid = seed_run(migrated_engine)
+    created = get_run(migrated_engine, run_uuid).created_at
+    await queue.enqueue("converse-text", run_uuid=run_uuid, created_at=created)
+    await queue.redis.hset(CONFIG_HASH, "per_assistant_max_concurrency", "1")
+    # Someone else holds the only slot for this assistant (the target).
+    other = ExecutionBudget(queue.redis)
+    assert await other.acquire(
+        client="judge-stage-test", assistant="+15550009999", limit=1
+    )
+
+    worker = make_worker(migrated_engine, queue, FakeRunner())
+    worker.defer_backoff_s = 0.0
+    [entry] = await queue.claim("converse-text", consumer="w1", block_ms=1)
+
+    assert await worker.process(entry) == "deferred"
+    assert get_run(migrated_engine, run_uuid).status == "queued"   # untouched
+    [requeued] = await queue.claim("converse-text", consumer="w2", block_ms=1)
+    assert requeued.run_uuid == run_uuid
+    assert requeued.attempt == entry.attempt                        # not burned
+
+    # Slot freed → the deferred entry now converses to completion.
+    await other.release(client="judge-stage-test", assistant="+15550009999")
+    assert await worker.process(requeued) == "done"
+    assert get_run(migrated_engine, run_uuid).status == "evaluating"

@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from opkura.core.config import Settings
 from opkura.core.models import CallResult, CallStatus, TranscriptEntry
 from opkura.db.models import Run, Scenario as ScenarioRow
+from opkura.queue.admission import ExecutionBudget, budget_keys, load_config_async
 from opkura.queue.leases import LeaseManager, retry_or_dead
 from opkura.queue.streams import Entry, StageQueue
 
@@ -79,6 +80,10 @@ class StageWorker:
         self.leases = LeaseManager(
             queue.redis, consumer=consumer, lease_s=settings.queue_lease_s
         )
+        # P4.4 — the per-assistant budget is enforced HERE, where the calls
+        # are placed, so it holds across workers.
+        self.budget = ExecutionBudget(queue.redis)
+        self.defer_backoff_s = 0.05
         self._runner_factory = runner_factory
         self._handlers = {
             "converse-text": self._converse,
@@ -133,21 +138,22 @@ class StageWorker:
             return "duplicate"
 
         heartbeat = asyncio.create_task(self._heartbeat_forever(entry.run_uuid))
+        disposition = "done"
         try:
-            await self._handlers[entry.stage](entry)
+            outcome = await self._handlers[entry.stage](entry)
             await self.queue.ack(entry)
-            return "done"
+            if outcome == "defer":
+                disposition = "deferred"
         except Exception as exc:
             logger.exception("stage %s failed for run %s", entry.stage, entry.run_uuid)
-            outcome = await retry_or_dead(
+            disposition = await retry_or_dead(
                 self.queue, entry,
                 max_attempts=self.settings.queue_max_attempts,
                 error=f"{entry.stage} attempt {entry.attempt}: {exc!r}",
             )
-            if outcome == "dead":
+            if disposition == "dead":
                 self._fail_row(entry, error=f"dead-lettered after "
                               f"{entry.attempt} attempts: {exc!r}")
-            return outcome
         finally:
             heartbeat.cancel()
             try:
@@ -155,6 +161,19 @@ class StageWorker:
             except (asyncio.CancelledError, Exception):
                 pass
             await self.leases.release(entry.run_uuid)
+
+        if disposition == "deferred":
+            # Budget pressure is not a failure: same attempt count, and the
+            # re-enqueue happens AFTER the lease release above — otherwise
+            # another worker claiming the fresh entry would see OUR lease and
+            # drop the run as a duplicate.
+            await asyncio.sleep(self.defer_backoff_s)
+            await self.queue.enqueue(
+                entry.stage, run_uuid=entry.run_uuid,
+                created_at=entry.created_at, lane=entry.lane,
+                attempt=entry.attempt,
+            )
+        return disposition
 
     async def _heartbeat_forever(self, run_uuid: uuid_mod.UUID) -> None:
         interval = max(self.settings.queue_lease_s / 3.0, 0.01)
@@ -193,21 +212,42 @@ class StageWorker:
 
     # ---- stage: converse -----------------------------------------------------
 
-    async def _converse(self, entry: Entry) -> None:
+    async def _converse(self, entry: Entry) -> Optional[str]:
         with Session(self.engine) as session:
             run = self._load(session, entry)
             if run is None:
-                return
+                return None
             if run.status not in ("queued", "running"):
                 # Already past this stage (a reclaimed duplicate) — no-op.
-                return
+                return None
             scenario = self._scenario_for(session, run)
-            run.status = "running"
-            run.started_at = run.started_at or datetime.now(timezone.utc)
-            session.commit()
+            row = session.get(ScenarioRow, run.scenario_id)
+            raw_body = dict(row.body) if row is not None else {}
 
-        runner = self._conversation_runner()
-        result: CallResult = await runner.run_scenario(scenario)
+        # P4.4 — the per-assistant budget, held in Redis so it binds every
+        # worker at once. No slot → defer: same attempt, tiny backoff, the
+        # entry goes back on the stream after our lease is released.
+        client, assistant = budget_keys(raw_body)
+        cfg = await load_config_async(self.queue.redis)
+        if not await self.budget.acquire(
+            client=client, assistant=assistant,
+            limit=cfg.per_assistant_max_concurrency,
+        ):
+            return "defer"
+
+        try:
+            with Session(self.engine) as session:
+                run = self._load(session, entry)
+                run.status = "running"
+                run.started_at = run.started_at or datetime.now(timezone.utc)
+                session.commit()
+
+            runner = self._conversation_runner()
+            result: CallResult = await runner.run_scenario(scenario)
+        finally:
+            # Conversation end frees the slot (P4.3) — the judge queues
+            # separately and holds no phone line.
+            await self.budget.release(client=client, assistant=assistant)
 
         with Session(self.engine) as session:
             run = self._load(session, entry)
