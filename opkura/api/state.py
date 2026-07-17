@@ -27,6 +27,9 @@ class V3State:
     engine: Engine
     session_factory: sessionmaker
     executor: "object"  # opkura.api.executor.Executor (Protocol)
+    # P4.4 — present only when AUTOCALLS_ADMISSION_ENABLED=true (env-gated
+    # existence); None means the historical no-op gate.
+    admission_gate: "object | None" = None
 
 
 def install_v3(
@@ -45,11 +48,23 @@ def install_v3(
 
         executor = LocalRunnerExecutor(settings=settings, engine=engine)
 
+    admission_gate = None
+    if settings.admission_enabled:
+        import redis as sync_redis
+
+        from opkura.queue.admission import AdmissionGate
+
+        admission_gate = AdmissionGate(
+            sync_redis.from_url(settings.redis_url, decode_responses=True),
+            enabled=True,
+        )
+
     state = V3State(
         settings=settings,
         engine=engine,
         session_factory=sync_session_factory(engine),
         executor=executor,
+        admission_gate=admission_gate,
     )
     app.state.v3 = state
     install_error_envelope(app)

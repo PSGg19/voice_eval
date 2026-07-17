@@ -128,16 +128,32 @@ def _load_variable_set(session: Session, vs_id) -> Optional[varlib.VariableSet]:
 
 
 def create_run(
-    session: Session, settings: Settings, payload: RunIn, *, batch_id=None
+    session: Session, settings: Settings, payload: RunIn, *, batch_id=None, gate=None
 ) -> tuple[Run, bool]:
     """Admit one run. Returns (run_row, created) — created=False means the
-    idempotency key already owned a run and that run is being returned."""
+    idempotency key already owned a run and that run is being returned.
+
+    `gate` (P4.4, optional) is the AdmissionGate; when the env gate is on it
+    is consulted BEFORE any row exists. A kill-switch refusal is a 503
+    (operator intent, don't retry blindly); a budget refusal is a 429."""
     scenario = session.get(Scenario, payload.scenario_id)
     if scenario is None:
         raise api_error(
             404, "scenario_not_found", f"scenario {payload.scenario_id} does not exist"
         )
     body = scenario.body
+
+    if gate is not None:
+        from opkura.queue.admission import budget_keys
+
+        client, assistant = budget_keys(dict(body))
+        decision = gate.check(client=client, assistant=assistant)
+        if not decision.admitted:
+            raise api_error(
+                429 if decision.retryable else 503,
+                "admission_refused",
+                decision.reason,
+            )
 
     transport = payload.transport or body.get("transport") or settings.call_transport
 
