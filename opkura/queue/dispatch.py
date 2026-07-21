@@ -48,13 +48,22 @@ def lane_for_run(run: Run) -> str:
 
 
 class QueueExecutor:
-    """Executor Protocol implementation that dispatches to Redis Streams."""
+    """Executor Protocol implementation that dispatches to Redis Streams.
 
-    def __init__(self, *, engine: Engine, queue: StageQueue):
+    `dispatcher` (P4.5, optional): when present, BATCH members park in the
+    fair dispatcher's per-suite pool and reach the stream via water-filled,
+    token-paced pump cycles; interactive runs always go straight to their
+    stream — a person is waiting.
+    """
+
+    def __init__(self, *, engine: Engine, queue: StageQueue, dispatcher=None):
         self.engine = engine
         self.queue = queue
+        self.dispatcher = dispatcher
 
     async def execute(self, run_uuid: uuid_mod.UUID) -> None:
+        from opkura.db.models import Scenario as ScenarioRow
+
         with Session(self.engine) as session:
             run = session.execute(
                 select(Run).where(Run.run_uuid == run_uuid)
@@ -65,15 +74,30 @@ class QueueExecutor:
             stage = stage_for_transport(run.transport)
             lane = lane_for_run(run)
             created_at = run.created_at
+            batch_id = run.batch_id
+            body: dict = {}
+            if self.dispatcher is not None and batch_id is not None:
+                row = session.get(ScenarioRow, run.scenario_id)
+                body = dict(row.body) if row is not None else {}
             # The row is the record: 'queued' is committed BEFORE the XADD so
             # a Redis failure leaves a truthful row, not a lost run.
             run.status = "queued"
             session.commit()
 
         try:
-            await self.queue.enqueue(
-                stage, run_uuid=run_uuid, created_at=created_at, lane=lane
-            )
+            if self.dispatcher is not None and batch_id is not None:
+                from opkura.queue.admission import budget_keys
+
+                _client, assistant = budget_keys(body)
+                await self.dispatcher.submit(
+                    assistant=assistant, batch=str(batch_id), stage=stage,
+                    run_uuid=run_uuid, created_at=created_at.isoformat(),
+                    lane=lane,
+                )
+            else:
+                await self.queue.enqueue(
+                    stage, run_uuid=run_uuid, created_at=created_at, lane=lane
+                )
         except Exception as exc:
             logger.warning(
                 "dispatch deferred: Redis enqueue failed for run %s (%s) — row "

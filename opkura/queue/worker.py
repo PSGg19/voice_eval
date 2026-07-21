@@ -166,7 +166,9 @@ class StageWorker:
             # Budget pressure is not a failure: same attempt count, and the
             # re-enqueue happens AFTER the lease release above — otherwise
             # another worker claiming the fresh entry would see OUR lease and
-            # drop the run as a duplicate.
+            # drop the run as a duplicate. (The staged gauge stays decremented
+            # for the round trip — a one-entry undercount while the assistant
+            # is saturated, which is exactly when extra staging is pointless.)
             await asyncio.sleep(self.defer_backoff_s)
             await self.queue.enqueue(
                 entry.stage, run_uuid=entry.run_uuid,
@@ -224,10 +226,16 @@ class StageWorker:
             row = session.get(ScenarioRow, run.scenario_id)
             raw_body = dict(row.body) if row is not None else {}
 
+        # P4.5 — this staged entry is becoming an in-flight conversation;
+        # the fair dispatcher's standing buffer frees one slot to refill.
+        client, assistant = budget_keys(raw_body)
+        from opkura.queue.fairness import _DECR_CLAMPED_LUA, staged_gauge
+
+        await self.queue.redis.eval(_DECR_CLAMPED_LUA, 1, staged_gauge(assistant))
+
         # P4.4 — the per-assistant budget, held in Redis so it binds every
         # worker at once. No slot → defer: same attempt, tiny backoff, the
         # entry goes back on the stream after our lease is released.
-        client, assistant = budget_keys(raw_body)
         cfg = await load_config_async(self.queue.redis)
         if not await self.budget.acquire(
             client=client, assistant=assistant,
