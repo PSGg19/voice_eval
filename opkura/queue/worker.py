@@ -84,6 +84,7 @@ class StageWorker:
         # are placed, so it holds across workers.
         self.budget = ExecutionBudget(queue.redis)
         self.defer_backoff_s = 0.05
+        self._stopping = False
         self._runner_factory = runner_factory
         self._handlers = {
             "converse-text": self._converse,
@@ -112,6 +113,85 @@ class StageWorker:
         return TestRunner(self.settings, per_run_debug_log=False)
 
     # ---- the claim cycle ----------------------------------------------------
+
+    async def run_forever(
+        self,
+        *,
+        slots: int = 4,
+        interactive_reserve: int = 1,
+        idle_sleep_s: float = 0.2,
+    ) -> None:
+        """The worker loop: `slots` concurrent entries, with P4.6's lane
+        policy — batch work may occupy at most `slots - interactive_reserve`
+        of them, so an interactive run submitted mid-batch always finds a
+        slot within one cycle instead of queueing behind 500 batch entries.
+        Interactive runs may use ANY slot (the reserve is a floor for them,
+        not a ceiling).
+
+        `request_stop()` (P4.7) flips the loop into drain: no new claims,
+        in-flight entries finish, then the loop returns. A stop requested
+        BEFORE the loop starts is honoured too (no reset here).
+        """
+        in_flight: dict[asyncio.Task, str] = {}   # task -> lane
+        batch_cap = max(0, slots - max(0, interactive_reserve))
+
+        try:
+            while True:
+                for task in [t for t in in_flight if t.done()]:
+                    lane = in_flight.pop(task)
+                    if task.exception() is not None:  # pragma: no cover — process() catches
+                        logger.error("worker task (%s lane) crashed: %r",
+                                     lane, task.exception())
+
+                if self._stopping:
+                    if not in_flight:
+                        return
+                    await asyncio.wait(set(in_flight),
+                                       return_when=asyncio.FIRST_COMPLETED)
+                    continue
+
+                free = slots - len(in_flight)
+                if free <= 0:
+                    await asyncio.wait(set(in_flight),
+                                       return_when=asyncio.FIRST_COMPLETED)
+                    continue
+
+                batch_busy = sum(1 for lane in in_flight.values() if lane == "batch")
+                batch_room = max(0, batch_cap - batch_busy)
+                claimed: list[Entry] = []
+                for stage in self.stages:
+                    if len(claimed) >= free:
+                        break
+                    # Interactive may take any free slot; batch only its
+                    # remaining share of `slots - reserve` (the reserved
+                    # slice is a floor for interactive, a ceiling for batch).
+                    got = await self.queue.claim(
+                        stage, consumer=self.consumer, lanes=("interactive",),
+                        count=free - len(claimed), block_ms=20,
+                    )
+                    claimed.extend(got)
+                    want_batch = min(free - len(claimed), batch_room)
+                    if want_batch > 0:
+                        got = await self.queue.claim(
+                            stage, consumer=self.consumer, lanes=("batch",),
+                            count=want_batch, block_ms=20,
+                        )
+                        batch_room -= len(got)
+                        claimed.extend(got)
+                if not claimed:
+                    await asyncio.sleep(idle_sleep_s)
+                    continue
+                for entry in claimed:
+                    task = asyncio.create_task(self.process(entry))
+                    in_flight[task] = entry.lane
+        finally:
+            # However the loop exits, never abandon claimed work silently.
+            if in_flight:
+                await asyncio.wait(set(in_flight))
+
+    def request_stop(self) -> None:
+        """Stop claiming; drain in-flight; run_forever returns when empty."""
+        self._stopping = True
 
     async def run_once(self, *, block_ms: int = 200) -> int:
         """Claim and process up to one entry per stage. Returns entries handled."""
