@@ -460,3 +460,49 @@ def _verdict_dict(result: CallResult) -> dict:
         out["metrics"] = ev.metrics or {}
     out["assertion_outcomes"] = result.assertion_outcomes
     return out
+
+
+async def housekeeping(queue: StageQueue, engine: Engine, *, lease_s: float,
+                       max_attempts: int, interval_s: float,
+                       stop: asyncio.Event) -> None:
+    """Reaper + stuck-dispatch sweep + fair pump, one shared cadence.
+
+    Idempotent and safe to run on many processes at once: XAUTOCLAIM hands
+    each pending entry to exactly one sweeper, redispatch duplicates collapse
+    on the lease, and the pump's LPOP is atomic. Runs on every `opkura
+    worker` and on the API process when queue_enabled."""
+    from opkura.queue.dispatch import redispatch_stuck
+    from opkura.queue.fairness import FairDispatcher
+    from opkura.queue.leases import Reaper
+
+    reaper = Reaper(queue, lease_s=lease_s, max_attempts=max_attempts)
+    dispatcher = FairDispatcher(queue.redis, queue)
+    while not stop.is_set():
+        try:
+            stats = await reaper.sweep()
+            if stats.dead:
+                # Dead-lettered runs must fail their rows even when the crash
+                # happened on another (now dead) worker.
+                with Session(engine) as session:
+                    for run_uuid in stats.dead_runs:
+                        run = session.execute(
+                            select(Run).where(Run.run_uuid == run_uuid)
+                        ).scalar_one_or_none()
+                        if run is not None and run.status not in (
+                            "completed", "failed", "cancelled"
+                        ):
+                            run.status = "failed"
+                            run.error = run.error or (
+                                "dead-lettered: max attempts exhausted "
+                                "(lease expired repeatedly)"
+                            )
+                            run.finished_at = datetime.now(timezone.utc)
+                    session.commit()
+            await redispatch_stuck(engine, queue)
+            await dispatcher.pump()
+        except Exception:
+            logger.exception("housekeeping cycle failed — retrying next cycle")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_s)
+        except asyncio.TimeoutError:
+            pass

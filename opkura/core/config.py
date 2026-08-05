@@ -332,6 +332,13 @@ class Settings(BaseSettings):
     # in the dead-letter stream with the failure attached.
     queue_lease_s: float = 30.0
     queue_max_attempts: int = 3
+    # Drain (P4.7): after SIGTERM, in-flight runs get this long to finish
+    # before the loop is cancelled and the reaper inherits the entries.
+    queue_drain_deadline_s: float = 30.0
+    # Worker sizing (P4.6): concurrent entries per worker, with a slice
+    # reserved for the interactive lane.
+    worker_slots: int = 4
+    worker_interactive_reserve: int = 1
     # Admission control (P4.4). Env-gated existence: disabled → the gate is
     # the historical no-op. Live tuning rides the Redis config hash.
     admission_enabled: bool = False

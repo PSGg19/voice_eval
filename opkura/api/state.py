@@ -44,9 +44,17 @@ def install_v3(
     settings = settings or Settings.from_env()
     engine = engine or sync_engine(settings.database_url)
     if executor is None:
-        from opkura.api.executor import LocalRunnerExecutor
+        # P4 exit criterion: the in-process BackgroundTasks execution path is
+        # deleted. The default executor DISPATCHES (row → 'queued' + one
+        # stream entry); StageWorkers do the running — dedicated `opkura
+        # worker` processes, and/or the embedded worker this function starts
+        # below when queue_enabled (voice always runs there this phase).
+        from opkura.queue.dispatch import QueueExecutor
+        from opkura.queue.streams import StageQueue, connect
 
-        executor = LocalRunnerExecutor(settings=settings, engine=engine)
+        executor = QueueExecutor(
+            engine=engine, queue=StageQueue(connect(settings.redis_url))
+        )
 
     admission_gate = None
     if settings.admission_enabled:
@@ -72,7 +80,83 @@ def install_v3(
     from opkura.api.router import router
 
     app.include_router(router)
+    if settings.queue_enabled:
+        _install_queue_services(app, state)
     return state
+
+
+def _install_queue_services(app: FastAPI, state: V3State) -> None:
+    """The API process's embedded StageWorker + housekeeping (queue_enabled).
+
+    Voice converses HERE this phase — per-worker addressing for media
+    streams is Phase 6 — and consuming every stage as well makes a
+    single-process deployment complete without a separate `opkura worker`.
+    Shutdown drains: no new claims, in-flight finishes (bounded by the drain
+    deadline), housekeeping stops last.
+    """
+    import asyncio
+    import uuid as uuid_mod
+
+    services: dict = {}
+
+    async def _start() -> None:
+        from opkura.queue.streams import StageQueue, connect
+        from opkura.queue.worker import StageWorker, housekeeping
+
+        settings = state.settings
+        queue = StageQueue(connect(settings.redis_url))
+        try:
+            await queue.ensure_groups()
+        except Exception as exc:
+            # Redis down at boot: the API must still serve (admission keeps
+            # accepting; rows wait as 'queued'). Services stay off until a
+            # restart — the degraded state is logged, not fatal.
+            import logging
+
+            logging.getLogger(__name__).error(
+                "queue services NOT started (Redis unreachable: %s) — runs "
+                "will queue in Postgres until a worker can dispatch them", exc
+            )
+            return
+        worker = StageWorker(
+            settings=settings, engine=state.engine, queue=queue,
+            consumer=f"api-{uuid_mod.uuid4().hex[:6]}",
+            stages=("converse-voice", "converse-text", "evaluate", "settle"),
+        )
+        stop = asyncio.Event()
+        services["worker"] = worker
+        services["stop"] = stop
+        services["loop"] = asyncio.create_task(worker.run_forever(
+            slots=settings.worker_slots,
+            interactive_reserve=settings.worker_interactive_reserve,
+        ))
+        services["housekeeper"] = asyncio.create_task(housekeeping(
+            queue, state.engine,
+            lease_s=settings.queue_lease_s,
+            max_attempts=settings.queue_max_attempts,
+            interval_s=max(settings.queue_lease_s / 2, 1.0),
+            stop=stop,
+        ))
+
+    async def _stop() -> None:
+        worker = services.get("worker")
+        if worker is None:
+            return
+        worker.request_stop()
+        try:
+            await asyncio.wait_for(
+                services["loop"], timeout=state.settings.queue_drain_deadline_s
+            )
+        except (asyncio.TimeoutError, Exception):
+            services["loop"].cancel()
+        services["stop"].set()
+        try:
+            await asyncio.wait_for(services["housekeeper"], timeout=5)
+        except (asyncio.TimeoutError, Exception):
+            services["housekeeper"].cancel()
+
+    app.add_event_handler("startup", _start)
+    app.add_event_handler("shutdown", _stop)
 
 
 def get_state(request: Request) -> V3State:
