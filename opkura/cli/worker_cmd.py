@@ -48,6 +48,7 @@ async def worker_main(
     slots: int,
     interactive_reserve: int,
     install_signals: bool = True,
+    runner_factory=None,
 ) -> None:
     from opkura.db.engine import sync_engine
     from opkura.queue.streams import StageQueue, connect
@@ -60,6 +61,7 @@ async def worker_main(
     worker = StageWorker(
         settings=settings, engine=engine, queue=queue,
         consumer=consumer, stages=stages,
+        runner_factory=runner_factory,
     )
     if install_signals:
         install_signal_handlers(asyncio.get_running_loop(), worker)

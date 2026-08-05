@@ -72,6 +72,15 @@ opkura = "opkura.cli.main:main"
 [tool.setuptools.packages.find]
 include = ["opkura*"]
 
+[tool.pytest.ini_options]
+# The two-worker proof (tests/distributed/) runs real worker subprocesses
+# against the compose Redis + native Postgres — deliberately not part of a
+# plain `pytest tests/`. CI runs it as its own job: `pytest -m distributed`.
+markers = [
+    "distributed: cross-process queue proofs against compose Redis (run with -m distributed)",
+]
+addopts = "-m 'not distributed'"
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
