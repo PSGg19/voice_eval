@@ -72,16 +72,40 @@ class VoiceFrameAdapter:
     def __init__(self, caller: AICallerEngine):
         self._caller = caller
         self._inbound: asyncio.Queue[Frame] = asyncio.Queue()
-        self._reply: Optional[asyncio.Future] = None
+        # (future, owning loop) for the currently parked end_bot_turn. TWO
+        # loops meet here in production: the ConversationEngine task runs on
+        # the RUNNER's loop, while MediaStreamSession drives the bridge from
+        # the FastAPI server's thread/loop (cli/main.py runs uvicorn in a
+        # thread). asyncio primitives are not thread-safe, so every crossing
+        # goes through call_soon_threadsafe — proven live by the 2026-08-31
+        # voice smoke, where same-loop put_nowait never woke the engine and
+        # the caller's reply arrived 23s after the bot gave up and hung up.
+        self._reply: Optional[tuple[asyncio.Future, asyncio.AbstractEventLoop]] = None
+        self._engine_loop: Optional[asyncio.AbstractEventLoop] = None
         self._ended = False
         self.bridge = StreamFlowBridge(self, caller)
+
+    def _push(self, frame: Frame) -> None:
+        """Enqueue a frame onto the ENGINE's loop, from any thread."""
+        target = self._engine_loop
+        try:
+            here = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover — non-async caller
+            here = None
+        if target is None or target is here:
+            self._inbound.put_nowait(frame)
+        else:
+            target.call_soon_threadsafe(self._inbound.put_nowait, frame)
 
     # ---- FrameTransport --------------------------------------------------
 
     async def start(self) -> None:
         # Dialing/answer is the runner's affair (Twilio + the FastAPI WS);
-        # frames simply begin arriving once the stream attaches.
-        return None
+        # frames simply begin arriving once the stream attaches. Capturing
+        # the loop here is what makes cross-thread pushes deliverable — the
+        # runner creates the engine task before it dials, so this runs
+        # before any WS can land.
+        self._engine_loop = asyncio.get_running_loop()
 
     async def receive(self) -> Frame:
         return await self._inbound.get()
@@ -97,11 +121,13 @@ class VoiceFrameAdapter:
                 hangup = True
         if hangup:
             self._ended = True
-        reply = self._reply
-        if reply is not None and not reply.done():
+        parked = self._reply
+        if parked is not None:
             # D1: speech travels in the same turn as the hangup — the stream
-            # speaks it before its loop sees is_complete.
-            reply.set_result(CallerTurn(speech=speech, dtmf=dtmf, hangup=hangup))
+            # speaks it before its loop sees is_complete. The future belongs
+            # to the BRIDGE's loop; resolve it there.
+            turn = CallerTurn(speech=speech, dtmf=dtmf, hangup=hangup)
+            self._resolve(parked, turn)
         elif speech or dtmf or hangup:
             logger.warning(
                 "voice adapter had no parked turn for delivery "
@@ -109,13 +135,30 @@ class VoiceFrameAdapter:
                 speech[:60], dtmf, hangup,
             )
 
+    @staticmethod
+    def _resolve(parked: tuple, value) -> None:
+        fut, fut_loop = parked
+
+        def _set() -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        try:
+            here = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover — non-async caller
+            here = None
+        if here is fut_loop:
+            _set()
+        else:
+            fut_loop.call_soon_threadsafe(_set)
+
     async def finish(self, *, graceful: bool) -> None:
         self._ended = True
-        reply = self._reply
-        if reply is not None and not reply.done():
+        parked = self._reply
+        if parked is not None:
             # D5, the cancel half: unblock the parked stream with "nothing" —
             # its loop exits at the next is_complete check without speaking.
-            reply.set_result(None)
+            self._resolve(parked, None)
         # graceful=True changes nothing here: the stream's own teardown
         # already drains in-flight TTS and barge tasks.
 
@@ -128,7 +171,7 @@ class VoiceFrameAdapter:
         is simply never read again.
         """
         self._ended = True
-        self._inbound.put_nowait(ControlEnded(reason=reason))
+        self._push(ControlEnded(reason=reason))
 
 
 class StreamFlowBridge:
@@ -152,19 +195,19 @@ class StreamFlowBridge:
     def accumulate_bot_speech(self, text: str) -> None:
         if text:
             self._parts.append(text)
-            self._adapter._inbound.put_nowait(BotFinalSpeech(text=text))
+            self._adapter._push(BotFinalSpeech(text=text))
 
     async def end_bot_turn(self) -> Optional[CallerTurn]:
         self.last_bot_utterance = " ".join(self._parts).strip()
         self._parts.clear()
         if self._adapter._ended:
             return None
+        # The future lives on THIS loop (the server's); the engine resolves
+        # it from its own loop via call_soon_threadsafe (see _resolve).
         loop = asyncio.get_running_loop()
         reply: asyncio.Future = loop.create_future()
-        self._adapter._reply = reply
-        self._adapter._inbound.put_nowait(
-            BotTurnEnded(transport_ms=self._transport_ms)
-        )
+        self._adapter._reply = (reply, loop)
+        self._adapter._push(BotTurnEnded(transport_ms=self._transport_ms))
         self._transport_ms = None
         try:
             turn = await reply
