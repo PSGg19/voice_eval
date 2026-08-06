@@ -269,3 +269,62 @@ async def test_text_and_voice_adapters_produce_identical_conversations():
     assert text_outcome.termination == voice_outcome.termination == Termination.CALLER_HANGUP
     assert text_outcome.caller_turns == voice_outcome.caller_turns == 3
     assert text_outcome.bot_turns == voice_outcome.bot_turns == 3
+
+
+# ------------------------------------- the two-loop production topology
+
+def test_bridge_on_a_second_threads_loop_round_trips():
+    """Regression (found by the 2026-08-31 live voice smoke): in production
+    the ConversationEngine runs on the runner's loop while MediaStreamSession
+    drives the bridge from the FastAPI server's THREAD. Same-loop asyncio
+    primitives silently failed to wake the engine — the caller's reply
+    arrived after the bot had given up and hung up. This test reproduces the
+    two-thread, two-loop topology and requires a prompt round trip."""
+    import threading
+
+    scenario = make_scenario()
+    llm = ScriptedLLM([
+        {"speech": "Hi, who is this?", "hangup": False},
+        {"speech": "Goodbye.", "hangup": True},
+    ])
+    caller = AICallerEngine(scenario, llm)
+    adapter = VoiceFrameAdapter(caller)
+    spoken: list[tuple] = []
+    errors: list[BaseException] = []
+
+    async def engine_side():
+        engine = ConversationEngine(scenario, caller)
+        return await engine.run(adapter)
+
+    def server_thread():
+        # The uvicorn-thread stand-in: its OWN event loop drives the bridge.
+        async def drive():
+            # wait until the engine captured its loop (start() ran)
+            for _ in range(100):
+                if adapter._engine_loop is not None:
+                    break
+                await asyncio.sleep(0.01)
+            for line in ["Hello, this is the bank.", "How can I help?"]:
+                adapter.bridge.accumulate_bot_speech(line)
+                turn = await asyncio.wait_for(adapter.bridge.end_bot_turn(), 5)
+                if turn is not None:
+                    spoken.append((turn.speech, turn.hangup))
+        try:
+            asyncio.run(drive())
+        except BaseException as exc:  # noqa: BLE001 — surfaced to the test
+            errors.append(exc)
+
+    async def main():
+        run_task = asyncio.create_task(engine_side())
+        thread = threading.Thread(target=server_thread)
+        thread.start()
+        while thread.is_alive():
+            await asyncio.sleep(0.02)
+        thread.join()
+        return await asyncio.wait_for(run_task, 5)
+
+    outcome = asyncio.run(main())
+
+    assert not errors, f"server-thread side failed: {errors}"
+    assert spoken == [("Hi, who is this?", False), ("Goodbye.", True)]
+    assert outcome.termination == Termination.CALLER_HANGUP
