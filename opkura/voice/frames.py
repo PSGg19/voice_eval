@@ -60,3 +60,11 @@ class UtteranceBoundary:
     turn end — turn detection applies the grace window on top."""
 
     ts_ms: float = 0.0
+
+
+@dataclass(frozen=True)
+class SpeakEnded:
+    """Our own utterance finished going out. Turn detection anchors the
+    bot-response transport latency (D3) to this."""
+
+    ts_ms: float = 0.0
