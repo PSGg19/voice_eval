@@ -22,7 +22,12 @@ PARTITION_NAME = "runs_y{y:04d}m{m:02d}"
 
 
 def _month_start(year: int, month: int) -> str:
-    return f"{year:04d}-{month:02d}-01"
+    # The explicit +00 offset is load-bearing: a bare date literal is cast to
+    # timestamptz in the SERVER's TimeZone, so on a server running IST the
+    # "UTC months" this module promises silently became IST months — found
+    # live at the 2026-08-31→09-01 IST midnight rollover, when a row
+    # timestamped Aug 31 UTC landed in the September partition.
+    return f"{year:04d}-{month:02d}-01 00:00:00+00"
 
 
 def _next_month(year: int, month: int) -> tuple[int, int]:
