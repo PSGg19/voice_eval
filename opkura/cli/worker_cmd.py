@@ -51,12 +51,37 @@ async def worker_main(
     runner_factory=None,
 ) -> None:
     from opkura.db.engine import sync_engine
+    from opkura.queue.registry import WorkerRegistry
     from opkura.queue.streams import StageQueue, connect
     from opkura.queue.worker import StageWorker, housekeeping
 
     engine = sync_engine(settings.database_url)
     queue = StageQueue(connect(settings.redis_url))
     await queue.ensure_groups()
+
+    # P6.4 — worker-owned dialing. A voice worker serves its OWN TwiML /
+    # status / media-stream endpoints and dials with its OWN public URL, so
+    # the call lands on the process that holds the session state
+    # (transport/server.py's _sessions is worker-local by construction).
+    if "converse-voice" in stages:
+        from opkura.cli.main import _start_server
+
+        _start_server(settings, transport="sip")
+        logger.info("voice worker serving callbacks at %s", settings.public_url)
+
+    registry = WorkerRegistry(queue.redis)
+    await registry.register(
+        consumer=consumer, public_url=settings.public_url, stages=stages
+    )
+
+    async def _registry_heartbeat() -> None:
+        while True:
+            await asyncio.sleep(registry.ttl_s / 3)
+            if not await registry.heartbeat(consumer):
+                await registry.register(
+                    consumer=consumer, public_url=settings.public_url,
+                    stages=stages,
+                )
 
     worker = StageWorker(
         settings=settings, engine=engine, queue=queue,
@@ -74,6 +99,7 @@ async def worker_main(
         interval_s=max(settings.queue_lease_s / 2, 1.0),
         stop=stop_housekeeping,
     ))
+    heartbeat_task = asyncio.create_task(_registry_heartbeat())
 
     loop_task = asyncio.create_task(worker.run_forever(
         slots=slots, interactive_reserve=interactive_reserve
@@ -108,6 +134,15 @@ async def worker_main(
                     break
     finally:
         stop_housekeeping.set()
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        try:
+            await registry.deregister(consumer)
+        except Exception:
+            pass
         try:
             await asyncio.wait_for(housekeeper, timeout=5)
         except (asyncio.TimeoutError, Exception):
