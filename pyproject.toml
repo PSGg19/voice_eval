@@ -65,6 +65,11 @@ vad = [
 test = [
     "fakeredis[lua]>=2.30",
 ]
+# LiveKit-SIP telephony provider (P6.7, India). The base install carries no
+# livekit dependency; the provider imports it lazily.
+livekit = [
+    "livekit-api>=0.7",
+]
 
 [project.scripts]
 opkura = "opkura.cli.main:main"
