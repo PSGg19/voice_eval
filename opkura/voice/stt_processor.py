@@ -99,6 +99,15 @@ class STTProcessor(Processor):
             if isinstance(leftover, _Emit):
                 await self.emit(leftover.frame)
 
+    async def cleanup(self) -> None:
+        # The cancel path never reaches on_call_ended — close the client's
+        # connection here or it leaks an FD per cancelled call (P6.5).
+        if self._stt is not None:
+            try:
+                await self._stt.stop()
+            except Exception:
+                pass
+
 
 class _Emit:
     """Internal wrapper: a callback-produced frame riding our own inbox so
