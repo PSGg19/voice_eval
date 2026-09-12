@@ -103,5 +103,9 @@ class VADProcessor(Processor):
                 self.inbox.put_nowait(_Signal(UtteranceBoundary()))
 
     async def on_call_ended(self, frame: CallEnded) -> None:
+        await self.cleanup()
+
+    async def cleanup(self) -> None:
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None

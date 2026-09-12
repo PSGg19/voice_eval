@@ -73,6 +73,12 @@ class Processor:
     async def on_call_ended(self, frame: CallEnded) -> None:
         """Last chance to flush state before the link stops. Default: none."""
 
+    async def cleanup(self) -> None:
+        """Release RESOURCES (sockets, executors, clients) — called on BOTH
+        shutdown paths: after a graceful drain and after cancel(). A cancelled
+        chain never reaches on_call_ended, so anything opened in start() must
+        be closed here or it leaks an FD per call (P6.5). Must be idempotent."""
+
     # ---- side tasks (the P6.5 registry) -------------------------------------
 
     def spawn(self, coro, *, name: str = "") -> asyncio.Task:
@@ -174,6 +180,7 @@ class Chain:
             return
         for p in self.processors:
             await p.reap()
+            await self._cleanup(p)
 
     async def cancel(self) -> None:
         """Drop everything now (the D5 cancel half): run tasks AND side
@@ -188,6 +195,14 @@ class Chain:
                 except (asyncio.CancelledError, Exception):
                     pass
             await p.reap()
+            await self._cleanup(p)
+
+    @staticmethod
+    async def _cleanup(p: Processor) -> None:
+        try:
+            await p.cleanup()
+        except Exception:
+            logger.exception("cleanup failed for processor %s", p.name)
 
     def orphans(self) -> list[asyncio.Task]:
         """Tasks still alive after stop/cancel — the acceptance assertion is
