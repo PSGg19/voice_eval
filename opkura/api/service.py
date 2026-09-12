@@ -111,6 +111,25 @@ def preflight_refusals(
         refusals.append({"error_type": "region_not_compliant", "message": str(e)})
     except RegionNotConfigured as e:
         refusals.append({"error_type": "region_not_configured", "message": str(e)})
+
+    # P6.6 — the provider chooser IS the compliance rule for voice: a region
+    # no configured telephony provider is allowed to carry is refused here,
+    # named. Twilio declares (us, ca); India needs the LiveKit-SIP provider,
+    # which activates once the org's India trunk coordinates are configured.
+    if transport in ("sip", "pstn"):
+        from opkura.voice.provider import ProviderRefusal, configured_providers
+
+        try:
+            provider_for_region = configured_providers(settings)
+            from opkura.voice.provider import provider_for
+
+            provider_for(region, provider_for_region)
+        except ProviderRefusal as e:
+            refusals.append({
+                "error_type": "provider_not_allowed",
+                "message": str(e),
+                "rule": e.rule,
+            })
     return refusals
 
 

@@ -343,6 +343,15 @@ class Settings(BaseSettings):
     # the historical no-op. Live tuning rides the Redis config hash.
     admission_enabled: bool = False
 
+    # ---- LiveKit-SIP provider (P6.7, India). Empty → the provider is not
+    # configured and India voice fails pre-flight with the S6 refusal. The
+    # trunk id and credentials come from the org's own India LiveKit project
+    # (the same one OSV dials with).
+    livekit_sip_url: str = ""
+    livekit_sip_api_key: str = ""
+    livekit_sip_api_secret: str = ""
+    livekit_sip_trunk_id_in: str = ""
+
     @property
     def ws_public_url(self) -> str:
         """Convert https:// public URL to wss:// for WebSocket."""
