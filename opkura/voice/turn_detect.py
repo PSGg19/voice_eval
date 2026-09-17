@@ -118,8 +118,10 @@ class TurnDetector(Processor):
             await self.emit(frame)
             return
         if isinstance(frame, SpeakEnded):
+            # CONSUMED, not forwarded: SpeakEnded originates at the TTS link
+            # (downstream) and reaches us via the session's feedback edge —
+            # forwarding it would circulate it forever.
             self._speak_ended_at = time.monotonic()
-            await self.emit(frame)
             return
         await self.emit(frame)
 

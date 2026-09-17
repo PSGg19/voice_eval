@@ -33,11 +33,14 @@ class STTProcessor(Processor):
     builds the client — a seam so tests inject a fake and production binds
     DeepgramSTT with its usual config."""
 
-    def __init__(self, stt_factory, name: str = "stt", **kw):
+    def __init__(self, stt_factory, name: str = "stt", *,
+                 emit_utterance_boundary: bool = True, **kw):
         super().__init__(name, **kw)
         self._factory = stt_factory
         self._stt = None
-        self._pending: list = []          # frames queued by callbacks
+        # False in Silero mode: the VAD is the SOLE turn-end authority, so
+        # Deepgram's UtteranceEnd must not produce a second opinion.
+        self._emit_boundary = emit_utterance_boundary
 
     # Callbacks may fire while handle() awaits; queue and flush in-order.
     def _cb_final(self, text: str) -> None:
@@ -52,7 +55,19 @@ class STTProcessor(Processor):
         self._out(SpeechStarted())
 
     def _cb_utterance_end(self) -> None:
-        self._out(UtteranceBoundary())
+        if self._emit_boundary:
+            self._out(UtteranceBoundary())
+
+    async def restart(self) -> None:
+        """Reattach support: the monolith rebuilds its STT connection per WS
+        attach ('STT is rebuilt per attach'); the chain session asks for the
+        same here."""
+        if self._stt is not None:
+            try:
+                await self._stt.stop()
+            except Exception as exc:
+                logger.warning("stt stop during restart failed: %s", exc)
+            await self._stt.start()
 
     def _out(self, frame) -> None:
         # Callbacks run on the chain's loop (the client's receive loop is a

@@ -51,7 +51,7 @@ from opkura.db.results import PgResultStore
 from opkura.transport.stream import MediaStreamSession
 from opkura.transport.text import TextTransport, TextTransportError
 from opkura.transport.text_adapter import TextFrameAdapter
-from opkura.transport.voice_adapter import VoiceFrameAdapter
+from opkura.voice.session import VoiceSession
 from opkura.transport.tts import DeepgramTTS
 
 logger = logging.getLogger(__name__)
@@ -396,6 +396,67 @@ class TestRunner:
         finally:
             call_id_var.reset(call_id_token)
 
+    def _build_voice_session(
+        self, *, scenario: Scenario, engine: AICallerEngine,
+        result: CallResult, session_id: str,
+    ) -> VoiceSession:
+        """The V2 voice path's session, chain-backed (P6). Heavy clients are
+        FACTORIES: the session builds them lazily on the server's loop, so
+        nothing here constructs a Deepgram connection on the runner's loop."""
+        settings = self._require_settings("voice transport")
+        conversation = ConversationEngine(scenario, engine)
+
+        def stt_factory(*, on_final, on_interim, on_speech_started,
+                        on_utterance_end):
+            from opkura.transport.stt import DeepgramSTT
+
+            # DeepgramSTT signals UtteranceEnd as on_final("") — adapt that
+            # convention to the chain's explicit on_utterance_end callback.
+            def final_adapter(text: str) -> None:
+                if text:
+                    on_final(text)
+                else:
+                    on_utterance_end()
+
+            return DeepgramSTT(
+                api_key=settings.deepgram_api_key,
+                on_final=final_adapter,
+                on_interim=on_interim,
+                on_speech_started=on_speech_started,
+                utterance_end_ms=scenario.stt.utterance_end_ms,
+                vad_events=settings.deepgram_vad_events,
+            )
+
+        def tts_factory():
+            if scenario.tts.model:
+                logger.info("Caller TTS voice override: %s", scenario.tts.model)
+                return DeepgramTTS(api_key=settings.deepgram_api_key,
+                                   model=scenario.tts.model)
+            return DeepgramTTS(api_key=settings.deepgram_api_key)
+
+        vad_factory = None
+        if settings.use_silero_vad:
+            def vad_factory():  # noqa: F811 — deliberate rebind
+                from opkura.transport.vad import SileroBotVAD
+
+                return SileroBotVAD()
+
+        return VoiceSession(
+            conversation=conversation,
+            caller=engine,
+            result=result,
+            stt_factory=stt_factory,
+            tts_factory=tts_factory,
+            vad_factory=vad_factory,
+            silero_silence_threshold_s=scenario.stt.silence_threshold_s,
+            turn_timeout_s=DEFAULT_BOT_TURN_TIMEOUT_MS / 1000,
+            call_manager=self.call_mgr,
+            session_id=session_id,
+            reconnect_ws_url=f"{settings.ws_public_url}/ws/{session_id}",
+            dtmf_transport=settings.dtmf_transport,
+            dtmf_reconnect_timeout_s=settings.dtmf_reconnect_timeout_s,
+        )
+
     async def _run_v2_scenario_body(
         self, scenario: Scenario, session_id: str, ctx: RunContext
     ) -> CallResult:
@@ -453,8 +514,7 @@ class TestRunner:
         # runtime. Everything else in this method — logwriter, engine, evaluator,
         # persistence, the finally block — is transport-agnostic and shared.
         is_text = transport == "text"
-        stream_session: Optional[MediaStreamSession] = None
-        voice_adapter: Optional[VoiceFrameAdapter] = None
+        stream_session: Optional[VoiceSession] = None
         text_transport: Optional[TextTransport] = None
         # Per-scenario caller voice. None until the VOICE branch needs one —
         # touching self.tts here would build a Deepgram client for every text
@@ -491,37 +551,14 @@ class TestRunner:
                             http=self.shared_http,  # the worker's pool (P1.3)
                         )
                 else:
-                    call_tts = self.tts
-                    if scenario.tts.model:
-                        call_tts = DeepgramTTS(
-                            api_key=self._require_settings("TTS").deepgram_api_key,
-                            model=scenario.tts.model,
-                        )
-                        logger.info("Caller TTS voice override: %s", scenario.tts.model)
-                    # P2.4 — voice is wrapped, not decomposed: the session
-                    # drives the StreamFlowBridge exactly like it drove the
-                    # engine, and the bridge frames the turn cycle for the
-                    # ConversationEngine running alongside (below). Barge-in,
-                    # VAD and DTMF stay inside the session, delegating to the
-                    # same AICallerEngine as before.
-                    voice_adapter = VoiceFrameAdapter(engine)
-                    stream_session = MediaStreamSession(
-                        engine=voice_adapter.bridge,
-                        deepgram_api_key=self.settings.deepgram_api_key,
-                        tts=call_tts,
-                        result=result,
-                        stt_utterance_end_ms=scenario.stt.utterance_end_ms,
-                        stt_vad_events=self.settings.deepgram_vad_events,
-                        use_silero_vad=self.settings.use_silero_vad,
-                        silero_silence_threshold_s=scenario.stt.silence_threshold_s,
-                        streaming_tts=self.settings.streaming_tts,
-                        tts_transport=self.settings.resolved_tts_transport,
-                        # Phase 3 (Task 2) — REST-DTMF redirect plumbing.
-                        call_manager=self.call_mgr,
+                    # P6 — voice runs on the processor chain. The whole
+                    # session (engine included) lives on the SERVER's loop;
+                    # this runner only dials, waits on the completion event,
+                    # and reads the result afterwards. All heavy clients are
+                    # factories so the session builds them on its own loop.
+                    stream_session = self._build_voice_session(
+                        scenario=scenario, engine=engine, result=result,
                         session_id=session_id,
-                        reconnect_ws_url=f"{self.settings.ws_public_url}/ws/{session_id}",
-                        dtmf_transport=self.settings.dtmf_transport,
-                        dtmf_reconnect_timeout_s=self.settings.dtmf_reconnect_timeout_s,
                     )
             except Exception as setup_exc:
                 logger.exception("V2 setup failed before dialing")
@@ -606,16 +643,6 @@ class TestRunner:
 
             elif stream_session is not None:
                 completion = asyncio.Event()
-                # P2.4: the conversation engine runs alongside the media
-                # session, fed frames by the bridge. It shares the session's
-                # AICallerEngine, so persona history and turn counting are one
-                # ledger. Voice keeps its own transcript inside the session
-                # (richer: barge entries, reaction timing) until Phase 6.
-                conversation = ConversationEngine(scenario, engine)
-                conversation_task = asyncio.create_task(
-                    conversation.run(voice_adapter),
-                    name=f"conversation-{session_id[:8]}",
-                )
                 # FastAPI server runs in a separate thread (cli/main.py:53).
                 # The server thread cannot call completion.set() directly —
                 # asyncio.Event is not thread-safe. Stash this loop so server
@@ -669,28 +696,6 @@ class TestRunner:
                         if result.status not in (CallStatus.COMPLETED, CallStatus.ERROR, CallStatus.FAILED):
                             result.finish(CallStatus.COMPLETED)
                 finally:
-                    # Unblock the conversation engine (the call is over
-                    # however we got here) and collect its outcome. Bounded:
-                    # the engine only has bookkeeping left at this point, so
-                    # a hang would be a bug worth an ERROR-adjacent log, not
-                    # a stuck worker slot.
-                    voice_adapter.transport_closed("call ended")
-                    try:
-                        outcome = await asyncio.wait_for(conversation_task, timeout=10)
-                        # Voice cannot observe module/tool frames live; the
-                        # engine still owns turn counting and termination.
-                        logger.info(
-                            "voice conversation outcome: termination=%s "
-                            "caller_turns=%d", outcome.termination,
-                            outcome.caller_turns,
-                        )
-                    except asyncio.TimeoutError:
-                        conversation_task.cancel()
-                        logger.error(
-                            "conversation engine did not settle after call end"
-                        )
-                    except Exception:
-                        logger.exception("conversation engine crashed on voice")
                     remove_session(session_id)
                     # Always tell Twilio to end the call when V2 control flow
                     # exits — the AI caller engine ends the conversation locally
