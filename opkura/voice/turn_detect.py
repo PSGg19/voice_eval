@@ -74,7 +74,14 @@ class TurnDetector(Processor):
     async def _ticker(self) -> None:
         while True:
             await asyncio.sleep(TICK_S)
-            self.inbox.put_nowait(_Tick())
+            try:
+                self.inbox.put_nowait(_Tick())
+            except asyncio.QueueFull:
+                # A full inbox means the chain is momentarily backed up; a
+                # lost tick is fine — the next one comes in 50ms. Raising
+                # here would kill the ticker and with it ALL future turn
+                # detection (the 2026-09-01 live-smoke failure mode).
+                continue
 
     def _on_speech_signal(self) -> None:
         if not self._speaking and self._speak_ended_at is not None:

@@ -96,7 +96,11 @@ class STTProcessor(Processor):
                 await self._stt.send_audio(frame.payload)
             except Exception as exc:
                 logger.warning("stt send_audio failed: %s", exc)
-            await self.emit(frame)         # audio flows on to taps (VAD, rec)
+            # CONSUMED. Audio must not travel past this link: 50 frames/sec
+            # through every downstream inbox floods the chain the moment
+            # audio-out paces a long utterance — the 2026-09-01 live smoke
+            # lost turn detection exactly that way. Taps that need audio
+            # (VAD, recording) sit UPSTREAM of, or beside, this link.
             return
         await self.emit(frame)
 

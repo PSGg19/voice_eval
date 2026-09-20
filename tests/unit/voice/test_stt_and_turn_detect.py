@@ -71,8 +71,8 @@ async def test_stt_processor_translates_callbacks_into_frames():
     assert stt.started and stt.stopped              # lifecycle tied to chain
     assert stt.audio == [b"SPEAK", b"quiet", b"DONE"]
     kinds = [type(f).__name__ for f in out]
-    # audio flows on to taps; speech frames appear in queue order
-    assert kinds.count("InboundAudio") == 3
+    # audio is CONSUMED at this link (downstream must never see raw media)
+    assert kinds.count("InboundAudio") == 0
     assert any(isinstance(f, SpeechStarted) for f in out)
     assert any(isinstance(f, BotPartialSpeech) and f.text == "hel" for f in out)
     assert any(isinstance(f, BotFinalSpeech) and f.text == "hello there" for f in out)
@@ -89,7 +89,8 @@ async def test_stt_send_failure_drops_nothing_downstream():
         return Broken(**callbacks)
 
     out = await run_processor(STTProcessor(factory), [InboundAudio(b"x")])
-    assert any(isinstance(f, InboundAudio) for f in out)   # audio still flowed
+    # audio consumed; the link survived and the sentinel still walked through
+    assert not any(isinstance(f, InboundAudio) for f in out)
 
 
 # ------------------------------------------------------------ turn detection

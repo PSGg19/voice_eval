@@ -332,3 +332,62 @@ async def test_reattach_outside_transition_is_refused():
     )
     with pytest.raises(RuntimeError, match="not in transition"):
         await session.reattach(FakeWS())
+
+
+@pytest.mark.asyncio
+async def test_sustained_media_during_playback_does_not_kill_turn_detection():
+    """Regression (2026-09-01 live smoke): raw media flooding the chain while
+    audio-out paced a long utterance filled the turn detector's inbox, its
+    ticker died on QueueFull, and no turn ever ended again. Audio now stops
+    at the STT link and tickers survive a full inbox — a call with heavy
+    inbound media during OUR playback must still converse to completion."""
+
+    class LongTTS(FakeTTS):
+        async def synthesize_stream(self, text):
+            self.spoken.append(text)
+            yield b"\x44" * (160 * 25)         # ~500ms of paced playback
+
+    scenario = make_scenario()
+    caller = AICallerEngine(scenario, ScriptedLLM([
+        {"speech": "A reasonably long reply that takes a while.", "hangup": False},
+        {"speech": "Goodbye.", "hangup": True},
+    ]))
+    conversation = ConversationEngine(scenario, caller)
+    result = CallResult(id="r", session_id="s" * 32, flow_name=scenario.name,
+                        target=scenario.target)
+    tts = LongTTS()
+    session = VoiceSession(
+        conversation=conversation, caller=caller, result=result,
+        stt_factory=lambda **cb: FakeSTT(
+            {b"T1": "First question?", b"T2": "Second question?"}, **cb),
+        tts_factory=lambda: tts, turn_timeout_s=5.0,
+        session_id="s" * 32,
+    )
+    for link in session.chain.processors:
+        if hasattr(link, "grace_s"):
+            link.grace_s = 0.1
+
+    completion = asyncio.Event()
+    session.attach_completion_event(completion, asyncio.get_running_loop())
+    ws = FakeWS()
+    handle = asyncio.create_task(session.handle(ws))
+    await ws.wire(START)
+    await ws.media(b"T1")
+    # While our long reply is being paced out, the wire keeps delivering
+    # media at full rate — far more frames than any inbox holds.
+    for _ in range(300):
+        await ws.media(b"\xff" * 160)
+        await asyncio.sleep(0.002)
+    assert await wait_for(lambda: len(tts.spoken) == 1)
+
+    await ws.media(b"T2")                      # the bot's SECOND turn
+    assert await wait_for(lambda: completion.is_set(), timeout=10), (
+        "turn detection died under media load — the live-smoke failure mode"
+    )
+    await ws.close_from_twilio()
+    await asyncio.wait_for(handle, 10)
+
+    assert tts.spoken == [
+        "A reasonably long reply that takes a while.", "Goodbye.",
+    ]
+    assert result.status == CallStatus.COMPLETED
