@@ -38,11 +38,11 @@ from opkura.engine.conversation import ConversationEngine
 from opkura.frames import CallerDTMF, CallerHangup, CallerSpeech
 from opkura.transport.dtmf import generate_sequence as generate_dtmf
 from opkura.transport.dtmf import validate_dtmf_string
-from opkura.transport.stream import (
+from opkura.transport.audio import mulaw_to_wav as _mulaw_to_wav
+from opkura.transport.dtmf_errors import (
     DTMFReconnectTimeoutError,
     DTMFRedirectAbortedError,
     DTMFRedirectFailedError,
-    _mulaw_to_wav,
 )
 from opkura.voice.audio_out import AudioOut
 from opkura.voice.barge_processor import BargeProcessor
@@ -404,81 +404,9 @@ class VoiceSession:
             )
 
     async def _send_dtmf_rest(self, digits: str) -> None:
-        """The monolith's REST-redirect state machine, verbatim semantics."""
-        if self._call_manager is None:
-            raise RuntimeError(
-                "_send_dtmf_rest called but no CallManager was wired in."
-            )
-        if not self._reconnect_ws_url:
-            raise RuntimeError(
-                "_send_dtmf_rest called but reconnect_ws_url is empty."
-            )
-        call_sid = self.result.call_sid
-        if not call_sid:
-            raise RuntimeError(
-                "_send_dtmf_rest called before Twilio sent 'start' — "
-                "no call_sid known yet, cannot redirect."
-            )
+        from opkura.transport.dtmf_redirect import send_dtmf_rest
 
-        logger.info("dtmf.redirect.start call_sid=%s digit_count=%d",
-                    call_sid, len(digits))
-        await self.pause(reason="dtmf_redirect")
-        reconnected_evt = self._reconnected
-        aborted_evt = self._aborted
-        transition_started = time.monotonic()
-
-        try:
-            await asyncio.to_thread(
-                self._call_manager.play_dtmf_and_reconnect,
-                call_sid=call_sid, digits=digits,
-                reconnect_ws_url=self._reconnect_ws_url,
-            )
-            logger.info("dtmf.redirect.twiml_ok call_sid=%s", call_sid)
-        except Exception as exc:
-            logger.error("dtmf.redirect.failed call_sid=%s exc=%s", call_sid, exc)
-            self._in_transition = False
-            raise DTMFRedirectFailedError(
-                call_sid=call_sid, cause=exc,
-                twilio_status=getattr(exc, "status", None),
-                twilio_code=getattr(exc, "code", None),
-            ) from exc
-
-        recon_task = asyncio.create_task(reconnected_evt.wait())
-        abort_task = asyncio.create_task(aborted_evt.wait())
-        try:
-            done, _pending = await asyncio.wait(
-                [recon_task, abort_task],
-                timeout=self._dtmf_reconnect_timeout_s,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        finally:
-            for t in (recon_task, abort_task):
-                if not t.done():
-                    t.cancel()
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
-
-        elapsed_ms = (time.monotonic() - transition_started) * 1000.0
-        if not done:
-            logger.warning("dtmf.redirect.timeout call_sid=%s elapsed_ms=%.0f",
-                           call_sid, elapsed_ms)
-            raise DTMFReconnectTimeoutError(
-                call_sid=call_sid, digit_count=len(digits),
-                elapsed_ms=elapsed_ms,
-                last_state=f"in_transition={self._in_transition}, "
-                           f"attach_count={self._attach_count}",
-            )
-        if aborted_evt.is_set():
-            raise DTMFRedirectAbortedError(
-                call_sid=call_sid,
-                lifecycle_event=self._aborted_event_name or "unknown",
-            )
-        logger.info(
-            "dtmf.redirect.reconnected call_sid=%s total_ms=%.0f attach_count=%d",
-            call_sid, elapsed_ms, self._attach_count,
-        )
+        await send_dtmf_rest(self, digits)
 
     # ------------------------------------------------------------- recording
 
