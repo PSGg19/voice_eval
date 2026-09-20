@@ -110,7 +110,11 @@ class VoiceSession:
         self._stt = STTProcessor(
             stt_factory, emit_utterance_boundary=vad_factory is None
         )
-        links: list = [self._stt]
+        # Chain order matters: the VAD sits BEFORE the STT link because the
+        # STT link CONSUMES audio — nothing past it may depend on raw media
+        # (audio flooding the downstream inboxes is how the 2026-09-01 smoke
+        # lost turn detection).
+        links: list = []
         if vad_factory is not None:
             links.append(VADProcessor(
                 vad_factory, silence_threshold_s=silero_silence_threshold_s
@@ -118,6 +122,7 @@ class VoiceSession:
             detector = TurnDetector(turn_timeout_s=turn_timeout_s, grace_s=0.0)
         else:
             detector = TurnDetector(turn_timeout_s=turn_timeout_s)
+        links.append(self._stt)
         links.append(detector)
         links.append(BargeProcessor(caller))
         self._bridge = EngineBridge(conversation)
@@ -317,6 +322,12 @@ class VoiceSession:
                 "voice conversation settled: termination=%s caller_turns=%d",
                 outcome.termination, outcome.caller_turns,
             )
+            # D3: voice measures TRANSPORT latency; feed it to the logwriter
+            # through the caller engine (the metadata.json percentiles).
+            caller = self.conversation.caller
+            if hasattr(caller, "record_bot_response_latency"):
+                for ms in outcome.transport_latencies_ms:
+                    caller.record_bot_response_latency(ms)
         if self.result.status == CallStatus.IN_PROGRESS:
             self.result.finish(CallStatus.COMPLETED)
         self._signal_completion()

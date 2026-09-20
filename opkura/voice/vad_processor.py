@@ -92,15 +92,21 @@ class VADProcessor(Processor):
             except Exception:  # pragma: no cover — defensive
                 continue
             if seen and not self._onset_announced:
-                self._onset_announced = True
-                self.inbox.put_nowait(_Signal(SpeechStarted()))
+                try:
+                    self.inbox.put_nowait(_Signal(SpeechStarted()))
+                    self._onset_announced = True
+                except asyncio.QueueFull:
+                    pass          # retry next tick — never kill the watcher
             elif seen and quiet_s >= self.silence_threshold_s:
+                try:
+                    self.inbox.put_nowait(_Signal(UtteranceBoundary()))
+                except asyncio.QueueFull:
+                    continue      # retry next tick
                 # The turn is over — Silero's word is final. Reset for the
                 # next turn before announcing, so a fast bot resumption
                 # counts as a NEW turn, not a continuation.
                 self._vad.reset()
                 self._onset_announced = False
-                self.inbox.put_nowait(_Signal(UtteranceBoundary()))
 
     async def on_call_ended(self, frame: CallEnded) -> None:
         await self.cleanup()
