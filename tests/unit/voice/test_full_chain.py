@@ -156,6 +156,98 @@ async def test_full_chain_conversation_end_to_end():
     assert chain.orphans() == []
 
 
+# ------------------------------------- PRD acceptance: transport identity
+
+class FakeTextBackend:
+    """Text side of the identity test: same bot lines, HTTP-shaped."""
+
+    def __init__(self, lines: list[str]):
+        self._lines = list(lines)
+        self.interaction_uuid = "int-identity"
+
+    def _next(self):
+        from opkura.transport.text import BotTurn
+
+        text = self._lines.pop(0) if self._lines else "(exhausted)"
+        return BotTurn(text=text, message_type="RECORD")
+
+    async def start(self):
+        return self._next()
+
+    async def send(self, speech: str = "", dtmf: str = ""):
+        return self._next()
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_text_adapter_and_voice_chain_produce_identical_conversations():
+    """PRD acceptance: the same scenario through the text adapter and through
+    the full voice chain yields identical transcripts and termination."""
+    from opkura.transport.text_adapter import TextFrameAdapter
+
+    scenario = make_scenario()
+    bot_lines = [
+        "Hello, this is Riverline Bank.",
+        "Can I get your date of birth?",
+        "Thank you. Anything else today?",
+    ]
+    replies = [
+        {"speech": "Hi, you called me earlier.", "hangup": False},
+        {"speech": "Fourth of August, two thousand one.", "hangup": False},
+        {"speech": "No, that's all. Goodbye.", "hangup": True},
+    ]
+
+    # -- text path
+    text_engine = ConversationEngine(
+        scenario, AICallerEngine(scenario, ScriptedLLM(replies))
+    )
+    text_outcome = await text_engine.run(TextFrameAdapter(FakeTextBackend(bot_lines)))
+
+    # -- voice path: the same bot lines arrive as recognised audio
+    conversation = ConversationEngine(
+        scenario, AICallerEngine(scenario, ScriptedLLM(replies))
+    )
+    stt_script = {f"T{i}".encode(): line for i, line in enumerate(bot_lines)}
+
+    async def send_text(msg: str) -> None:
+        pass
+
+    bridge = EngineBridge(conversation)
+    chain = Chain([
+        STTProcessor(lambda **cb: FakeSTT(stt_script, **cb)),
+        TurnDetector(turn_timeout_s=5.0, grace_s=0.1),
+        bridge,
+        TTSProcessor(lambda: FakeTTS()),
+        AudioOut(send_text, TwilioSerializer()),
+    ])
+    await chain.start()
+    for i in range(len(bot_lines)):
+        await chain.feed(InboundAudio(f"T{i}".encode()))
+        for _ in range(150):
+            await asyncio.sleep(0.02)
+            if bridge.hangup_delivered or len(
+                conversation.transcript
+            ) >= (i + 1) * 2:
+                break
+    await chain.stop(reason="identity test over")
+    voice_outcome = bridge.outcome
+    assert voice_outcome is not None
+
+    def shape(outcome):
+        return [(e.speaker, e.text, e.dtmf) for e in outcome.transcript]
+
+    assert shape(text_outcome) == shape(voice_outcome)
+    assert (
+        text_outcome.termination
+        == voice_outcome.termination
+        == Termination.CALLER_HANGUP
+    )
+    assert text_outcome.caller_turns == voice_outcome.caller_turns == 3
+    assert text_outcome.bot_turns == voice_outcome.bot_turns == 3
+
+
 @pytest.mark.asyncio
 async def test_chain_cancel_mid_conversation_reaps_everything():
     scenario = make_scenario()

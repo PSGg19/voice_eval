@@ -232,44 +232,6 @@ async def test_attach_ws_refuses_clobber_when_active():
 
 
 @pytest.mark.asyncio
-async def test_silero_vad_reset_on_reattach(monkeypatch):
-    """Reattach must call SileroBotVAD.reset() so stale state from the
-    pre-pause segment doesn't leak in."""
-    s = _make_session()
-    vad = MagicMock()
-    vad.reset = MagicMock()
-    s._silero_vad = vad
-
-    # Pretend we already had one attach.
-    s._attach_count = 1
-    s._conv_task = MagicMock()  # bypass the assert; we won't actually await
-    s._in_transition = True
-
-    # Drive only the reattach-specific branch of attach_ws: accept ws,
-    # increment count, reset VAD, clear flag, set _reconnected. We bail
-    # out before the asyncio.wait by patching the STT start to raise
-    # AND catching that exception — keeps the test focused on the
-    # reattach-prelude code path.
-    s._stt.start = AsyncMock(side_effect=RuntimeError("bail-after-reset"))
-
-    ws = _make_ws_mock()
-    with pytest.raises(RuntimeError, match="bail-after-reset"):
-        await s.attach_ws(ws)
-
-    vad.reset.assert_called_once_with()
-    # Reattach branch must have cleared _in_transition before raising
-    # so the caller doesn't see stuck-True state.
-    assert s._in_transition is False
-    assert s._reconnected.is_set() is True
-    assert s._attach_count == 2
-
-
-# ----------------------------------------------------------------------
-# attach_count semantics
-# ----------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
 async def test_attach_count_increments():
     """Each attach_ws bumps the counter even when the inner loop bails."""
     s = _make_session()

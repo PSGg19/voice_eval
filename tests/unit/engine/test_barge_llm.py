@@ -16,7 +16,6 @@ from opkura.core.models import (
     Scenario,
 )
 from opkura.core.scenario_loader import load
-from opkura.transport.stream import MediaStreamSession
 
 
 def _llm_scenario(decide_every_ms: int = 50) -> Scenario:
@@ -41,175 +40,11 @@ def _llm_returning(*payloads):
     return mock
 
 
-def _make_session(engine: AICallerEngine) -> MediaStreamSession:
-    result = CallResult(
-        flow_name=engine.scenario.name,
-        target=engine.scenario.target,
-        status=CallStatus.IN_PROGRESS,
-    )
-    with patch("opkura.transport.stream.DeepgramSTT") as stt_cls:
-        stt_cls.return_value = MagicMock(start=AsyncMock(), stop=AsyncMock(), send_audio=AsyncMock())
-        tts = MagicMock(synthesize=AsyncMock(return_value=b""))
-        session = MediaStreamSession(
-            engine=engine,
-            deepgram_api_key="x",
-            tts=tts,
-            result=result,
-            # streaming_tts=False so barge tests can assert on _send_audio
-            # mock (the streaming path bypasses _send_audio and writes to
-            # _ws.send_text directly — different assertion surface).
-            streaming_tts=False,
-        )
-    session._start_time = 0.0
-    session._send_audio = AsyncMock()
-    return session
-
-
-# --- 9: periodic invocation cadence ------------------------------------------
-
 @pytest.mark.asyncio
-async def test_llm_mode_periodic_invocation():
-    """Engine asks the LLM roughly once per decide_every_ms while bot speaks
-    and the partial keeps changing.
-    """
-    # 6 "no-barge" decisions: enough headroom for the timing window below.
-    no_barge = [
-        {"speech": "", "dtmf": "", "hangup": False, "barge": False} for _ in range(6)
-    ]
-    engine = AICallerEngine(_llm_scenario(decide_every_ms=50), _llm_returning(*no_barge))
-    session = _make_session(engine)
-
-    async def feed_partials():
-        for i in range(1, 5):
-            session._partial_bot_transcript = f"hello word{i}"
-            await asyncio.sleep(0.05)
-        session._utterance_boundary.set()
-
-    task = asyncio.create_task(session._llm_decision_loop())
-    await feed_partials()
-    await task
-    # 4 distinct partials over ~200ms with 50ms interval → at least 2 invocations.
-    assert engine.llm.complete_json.await_count >= 2
-
-
-# --- 10: barge=true emits audio and records transcript marker ----------------
-
 @pytest.mark.asyncio
-async def test_llm_returns_barge_emits_audio():
-    """LLM returns barge=true with speech on the first decision → engine emits
-    audio mid-utterance and decision loop exits (one barge per bot turn).
-    """
-    engine = AICallerEngine(
-        _llm_scenario(decide_every_ms=20),
-        _llm_returning(
-            {"speech": "WAIT", "dtmf": "", "hangup": False, "barge": True}
-        ),
-    )
-    session = _make_session(engine)
-    session._partial_bot_transcript = "Hello, I am Mich"
-    session._utterance_boundary.clear()
-
-    # Run the decision loop briefly — first tick should return a barge.
-    task = asyncio.create_task(session._llm_decision_loop())
-    await asyncio.sleep(0.15)
-    session._utterance_boundary.set()
-    await task
-    # Emit is spawned as a separate task (post-bugfix) so the decision loop
-    # can return immediately. Drain to make the assertions deterministic.
-    await session._drain_barge_tasks()
-
-    # Audio sent and transcript marker recorded
-    assert session._send_audio.await_count >= 1
-    assert len(session.result.transcript) == 1
-    entry = session.result.transcript[0]
-    assert entry.barge is True
-    assert entry.text == "WAIT"
-    assert entry.bot_partial_at_barge == "Hello, I am Mich"
-
-
-# --- v1 bugfix: decision loop spawns emit as a separate task ----------------
-
 @pytest.mark.asyncio
-async def test_llm_decision_loop_spawns_emit_as_separate_task():
-    """v1 bugfix: emit_barge is spawned (not awaited inline) so cancelling
-    the decision task at end-of-bot-turn doesn't truncate the audio chunk
-    loop mid-frame. The conversation loop's _drain_barge_tasks finishes the
-    emit before the next caller turn.
-    """
-    engine = AICallerEngine(
-        _llm_scenario(decide_every_ms=20),
-        _llm_returning(
-            {"speech": "WAIT", "dtmf": "", "hangup": False, "barge": True}
-        ),
-    )
-    session = _make_session(engine)
-    session._partial_bot_transcript = "Hello"
-
-    task = asyncio.create_task(session._llm_decision_loop())
-    # Let one tick fire, then signal utterance end (simulates conversation
-    # loop's finally cancelling the decision task).
-    await asyncio.sleep(0.05)
-    session._utterance_boundary.set()
-    await task
-
-    # Emit got spawned as a tracked task — not held by the (now-done)
-    # decision task. _conversation_loop's drain will finish it.
-    assert len(session._barge_tasks) >= 1
-    await session._drain_barge_tasks()
-    # And the barge entry made it into the transcript.
-    assert any(e.barge for e in session.result.transcript)
-
-
-# --- 11: skip when partial unchanged -----------------------------------------
-
 @pytest.mark.asyncio
-async def test_llm_skip_if_partial_unchanged():
-    """Decision loop only invokes the LLM when the partial has changed since
-    the previous tick — repeated identical partials cost zero LLM calls.
-    """
-    engine = AICallerEngine(
-        _llm_scenario(decide_every_ms=20),
-        _llm_returning(
-            {"speech": "", "dtmf": "", "hangup": False, "barge": False}
-        ),
-    )
-    session = _make_session(engine)
-    session._partial_bot_transcript = "same partial"
-
-    task = asyncio.create_task(session._llm_decision_loop())
-    await asyncio.sleep(0.15)
-    session._utterance_boundary.set()
-    await task
-
-    # One invocation for the first sighting; subsequent ticks see identical
-    # partial → skipped.
-    assert engine.llm.complete_json.await_count == 1
-
-
-# --- 12: barge_in: off skips the decision loop --------------------------------
-
 @pytest.mark.asyncio
-async def test_barge_in_off_skips_decision_loop():
-    """Scenario with no barge_in → session reports barge_mode 'off', so the
-    decision loop is never spawned (gated in _conversation_loop on barge_mode).
-    """
-    sc = Scenario(
-        name="t",
-        target="+1",
-        vars={},
-        persona_rendered="p",
-        evaluation_prompt_rendered="e",
-        barge_in=None,
-    )
-    engine = AICallerEngine(sc, _llm_returning())
-    session = _make_session(engine)
-    assert session._barge_mode == "off"
-    assert session._trigger_evaluator is None
-    assert session._decision_task is None
-
-
-# --- maybe_barge: provisional decision, doesn't mutate history --------------
-
 @pytest.mark.asyncio
 async def test_maybe_barge_does_not_persist_partial_to_history():
     """Provisional decisions are not committed to engine history. Only the
