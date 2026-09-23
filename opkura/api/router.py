@@ -8,6 +8,7 @@ import uuid as uuid_mod
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from opkura.api.schemas import (
     VariableSetUpdate,
     batch_to_dict,
     page_envelope,
+    run_detail_to_dict,
     run_to_dict,
     scenario_to_dict,
     target_to_dict,
@@ -345,7 +347,7 @@ def get_run(run_uuid: uuid_mod.UUID, session: Session = Depends(get_session)) ->
     ).scalar_one_or_none()
     if row is None:
         raise api_error(404, "run_not_found", f"run {run_uuid} does not exist")
-    return run_to_dict(row)
+    return run_detail_to_dict(row)
 
 
 # ------------------------------------------------------------------- batches
@@ -436,6 +438,87 @@ async def queue_gauges(state: V3State = Depends(get_state)) -> dict:
         out["depths"] = depths
         out["admission_enabled"] = state.settings.admission_enabled
         return out
+    finally:
+        try:
+            await redis.aclose()
+        except Exception:
+            pass
+
+
+# --------------------------------------------------------------- admission
+
+class AdmissionConfigIn(BaseModel):
+    """Partial update — only the fields present are written. The config lives
+    in the `opkura:admission:config` Redis hash the AdmissionGate re-reads
+    each cycle, so a change takes effect within one cycle, no restart."""
+
+    kill_switch: Optional[bool] = None
+    fleet_max_concurrency: Optional[int] = Field(default=None, ge=0)
+    per_client_max_concurrency: Optional[int] = Field(default=None, ge=0)
+    per_assistant_max_concurrency: Optional[int] = Field(default=None, ge=0)
+
+
+@router.get("/admission")
+async def get_admission(state: V3State = Depends(get_state)) -> dict:
+    from opkura.queue.admission import load_config_async
+    from opkura.queue.streams import connect
+
+    redis = connect(state.settings.redis_url)
+    try:
+        cfg = await load_config_async(redis)
+        return {
+            "admission_enabled": state.settings.admission_enabled,
+            **cfg.__dict__,
+        }
+    finally:
+        try:
+            await redis.aclose()
+        except Exception:
+            pass
+
+
+@router.put("/admission")
+async def put_admission(
+    payload: AdmissionConfigIn, state: V3State = Depends(get_state)
+) -> dict:
+    from opkura.queue.admission import CONFIG_HASH, load_config_async
+    from opkura.queue.streams import connect
+
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise api_error(422, "empty_update", "no admission fields to set")
+    mapping = {
+        k: ("1" if v else "0") if isinstance(v, bool) else str(v)
+        for k, v in fields.items()
+    }
+    redis = connect(state.settings.redis_url)
+    try:
+        await redis.hset(CONFIG_HASH, mapping=mapping)
+        cfg = await load_config_async(redis)
+        return {
+            "admission_enabled": state.settings.admission_enabled,
+            **cfg.__dict__,
+        }
+    finally:
+        try:
+            await redis.aclose()
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------------------- workers
+
+@router.get("/workers")
+async def list_workers(state: V3State = Depends(get_state)) -> dict:
+    """Live worker registry (Redis TTL rows — a worker that stops
+    heartbeating drops out on its own)."""
+    from opkura.queue.registry import WorkerRegistry
+    from opkura.queue.streams import connect
+
+    redis = connect(state.settings.redis_url)
+    try:
+        workers = await WorkerRegistry(redis).list_workers()
+        return {"items": sorted(workers, key=lambda w: w.get("consumer", ""))}
     finally:
         try:
             await redis.aclose()
