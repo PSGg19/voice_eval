@@ -167,6 +167,18 @@ def run_to_dict(r) -> dict:
     }
 
 
+def run_detail_to_dict(r) -> dict:
+    """The single-run view: everything the list view has, plus the payloads
+    that are too heavy for a list page — transcript, observations, judge
+    policy. List endpoints stay on run_to_dict deliberately."""
+    return {
+        **run_to_dict(r),
+        "transcript": r.transcript,
+        "observations": r.observations,
+        "judge_policy": r.judge_policy,
+    }
+
+
 def batch_to_dict(b, status_counts: dict[str, int]) -> dict:
     return {
         "id": b.id,

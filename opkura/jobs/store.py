@@ -110,6 +110,26 @@ class JobStore:
     async def exists(self, job_id: str) -> bool:
         return bool(await (await self.redis()).exists(_job_key(job_id)))
 
+    async def list_jobs(self) -> list[Job]:
+        """Every live job doc, newest first. Seed and seed-set keys share the
+        `opkura:job:` prefix with extra `:seed…` segments, so match on the
+        exact two-segment shape rather than a bare prefix."""
+        r = await self.redis()
+        jobs: list[Job] = []
+        async for key in r.scan_iter(match=f"{_NS}:job:*", count=200):
+            name = key.decode() if isinstance(key, bytes) else key
+            if name.count(":") != 2:          # opkura:job:<id> exactly
+                continue
+            raw = await r.get(name)
+            if raw is None:
+                continue
+            try:
+                jobs.append(Job.model_validate_json(raw))
+            except Exception:                  # a foreign/corrupt doc never
+                continue                       # breaks the listing
+        jobs.sort(key=lambda j: j.created_at, reverse=True)
+        return jobs
+
     # ------------------------------------------------------------------ seeds
 
     async def save_seed(self, job_id: str, seed: SeededCall) -> None:

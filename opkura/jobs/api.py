@@ -179,6 +179,33 @@ async def run_job(job_id: str, req: JobRunRequest, background: BackgroundTasks) 
     return job.ack()
 
 
+@router.get("", include_in_schema=False)
+@router.get("/")
+async def list_jobs() -> dict:
+    """Job summaries, newest first — the fields a listing needs, not the
+    full document (that's GET /v1/jobs/{job_id})."""
+    jobs = await job_store.list_jobs()
+    return {
+        "items": [
+            {
+                "job_id": j.job_id,
+                "status": j.status,
+                "created_at": j.created_at,
+                "updated_at": j.updated_at,
+                "error": j.error,
+                "eval_enabled": j.eval_enabled,
+                "call_count": len(j.calls),
+                "scenario_count": len(j.scenarios),
+                "result_count": len(j.results),
+                "target": j.config.target,
+                "region": getattr(j.config, "region", "us"),
+                "warnings": j.warnings,
+            }
+            for j in jobs
+        ]
+    }
+
+
 @router.get("/{job_id}")
 async def get_job(job_id: str) -> dict:
     """Full job document. Poll this if you can't receive a callback."""
