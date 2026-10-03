@@ -102,7 +102,11 @@ class StageWorker:
         from opkura.orchestrator.runner import TestRunner
 
         settings = self.settings.model_copy(update={"skip_evaluation": True})
-        return TestRunner(settings, per_run_debug_log=False)
+        # persist_result=False: the queue owns the canonical `runs` row; the
+        # runner writing its own would double-account every call in the store
+        # (one CLI-shaped duplicate per queue run, transcriptless).
+        return TestRunner(settings, per_run_debug_log=False,
+                          persist_result=False)
 
     def _judge_runner(self):
         """A TestRunner used only for _run_assertions/_run_evaluator."""
@@ -331,7 +335,11 @@ class StageWorker:
                 session.commit()
 
             runner = self._conversation_runner()
-            result: CallResult = await runner.run_scenario(scenario)
+            # The queue run's uuid becomes the session/log/trace id — one
+            # identifier across the console row, Loki lines, and traces.
+            result: CallResult = await runner.run_scenario(
+                scenario, run_id=str(entry.run_uuid)
+            )
         finally:
             # Conversation end frees the slot (P4.3) — the judge queues
             # separately and holds no phone line.

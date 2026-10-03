@@ -45,7 +45,7 @@ class SlowRunner:
         self.peak = 0
         self.started_at: dict[str, float] = {}
 
-    async def run_scenario(self, scenario):
+    async def run_scenario(self, scenario, *, run_id=None):
         self.in_flight += 1
         self.peak = max(self.peak, self.in_flight)
         self.started_at[scenario.name] = time.monotonic()

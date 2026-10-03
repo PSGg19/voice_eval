@@ -7,6 +7,8 @@ empty, `emit` is one ContextVar read, and no OTel module is ever imported
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from typing import Any, List, Optional
 
@@ -98,6 +100,14 @@ class ObservedLLM:
             raise
         finally:
             usage = getattr(result, "usage", None) or {}
+            prompt_text = completion_text = ""
+            if os.getenv("TRACE_CAPTURE_LLM_IO", "").strip().lower() in (
+                "1", "true", "on", "yes",
+            ):
+                prompt_text = _render_llm_io(args, kwargs)
+                data = getattr(result, "data", None)
+                if data is not None:
+                    completion_text = _clip(json.dumps(data, default=str))
             emit(
                 Generation(
                     role=self._role,
@@ -108,5 +118,29 @@ class ObservedLLM:
                     error=error,
                     started_ns=started,
                     ended_ns=time.time_ns(),
+                    prompt_text=prompt_text,
+                    completion_text=completion_text,
                 )
             )
+
+
+_LLM_IO_MAX = 8_000  # chars per side; spans must stay span-sized
+
+
+def _clip(text: str) -> str:
+    if len(text) <= _LLM_IO_MAX:
+        return text
+    return text[:_LLM_IO_MAX] + f"… [+{len(text) - _LLM_IO_MAX} chars]"
+
+
+def _render_llm_io(args: tuple, kwargs: dict) -> str:
+    """complete_json(system, messages, …) → a readable transcript-ish blob."""
+    system = kwargs.get("system", args[0] if args else "")
+    messages = kwargs.get("messages", args[1] if len(args) > 1 else [])
+    parts = []
+    if system:
+        parts.append(f"[system]\n{system}")
+    for m in messages if isinstance(messages, list) else []:
+        if isinstance(m, dict):
+            parts.append(f"[{m.get('role', '?')}]\n{m.get('content', '')}")
+    return _clip("\n\n".join(parts))

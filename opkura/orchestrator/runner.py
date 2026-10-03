@@ -123,6 +123,7 @@ class TestRunner:
         settings: Optional[Settings] = None,
         *,
         per_run_debug_log: bool = True,
+        persist_result: bool = True,
     ):
         """`settings=None` (P1.1) is legal for context-driven execution: a
         fully-ported RunContext supplies the collaborators, and the heavy
@@ -137,6 +138,10 @@ class TestRunner:
         # already carries run_id per line. CampaignRunner flips it from
         # max_concurrency at campaign start.
         self.per_run_debug_log = per_run_debug_log
+        # False when a caller owns the run record already — the queue's
+        # StageWorker persists the canonical `runs` row itself, and the
+        # runner writing its own would double-account every call.
+        self.persist_result = persist_result
         self._call_mgr: Optional[CallManager] = None
         self._tts: Optional[DeepgramTTS] = None
         self._store: Optional[PgResultStore] = None
@@ -289,9 +294,10 @@ class TestRunner:
                 logger.warning("Failed to save recording: %s", exc)
 
             try:
-                await self.store.save_result(
-                    result, transport=self.settings.call_transport
-                )
+                if self.persist_result:
+                    await self.store.save_result(
+                        result, transport=self.settings.call_transport
+                    )
             except Exception as exc:
                 logger.error(
                     "Failed to persist result (is Postgres reachable? "
@@ -332,20 +338,26 @@ class TestRunner:
         return await self._run_v2_scenario(scenario)
 
     async def run_scenario(
-        self, scenario: Scenario, ctx: Optional[RunContext] = None
+        self, scenario: Scenario, ctx: Optional[RunContext] = None,
+        *, run_id: Optional[str] = None,
     ) -> CallResult:
         """Run an already-parsed V2 scenario. Public entry for callers that
         hold a Scenario object rather than a file — the V3 run API (P3.3)
         builds one from a `scenarios.body` row via parse_scenario_data.
 
         `ctx` (P1.1) carries the run's resolved config and ports; omitted, it
-        is built here from Settings — this method IS the boundary."""
-        return await self._run_v2_scenario(scenario, ctx)
+        is built here from Settings — this method IS the boundary.
+
+        `run_id` lets a caller that already owns a run identity (the queue's
+        StageWorker owns the `runs` row) stamp it on the session, the log
+        context, and the trace — one id across DB, logs, and traces."""
+        return await self._run_v2_scenario(scenario, ctx, run_id=run_id)
 
     async def _run_v2_scenario(
-        self, scenario: Scenario, ctx: Optional[RunContext] = None
+        self, scenario: Scenario, ctx: Optional[RunContext] = None,
+        *, run_id: Optional[str] = None,
     ) -> CallResult:
-        session_id = uuid.uuid4().hex
+        session_id = run_id or uuid.uuid4().hex
         # Phase 2 concurrent-writer fix: set the per-call ContextVar so
         # every log record emitted within this scenario's task subtree
         # carries the right call_id. CallLogWriter's _CallIdFilter reads
@@ -752,10 +764,11 @@ class TestRunner:
             # the per-call log folder still captures the run state via the
             # finally block.
             try:
-                store = ctx.ports.result_store if ctx.ports.result_store is not None else self.store
-                await store.save_result(
-                    result, scenario=scenario, transport=transport
-                )
+                if self.persist_result:
+                    store = ctx.ports.result_store if ctx.ports.result_store is not None else self.store
+                    await store.save_result(
+                        result, scenario=scenario, transport=transport
+                    )
             except Exception as exc:
                 logger.error(
                     "Failed to persist result (is Postgres reachable? "

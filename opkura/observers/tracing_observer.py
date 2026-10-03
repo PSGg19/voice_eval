@@ -85,11 +85,21 @@ class TracingObserver:
         root: Optional[Any] = None
         for event in events:
             if isinstance(event, RunStarted):
+                # The short run id in the NAME is deliberate: Langfuse search
+                # matches ids/names only, never attributes — without it a
+                # console's "find this run's traces" search comes up empty.
                 root = self._tracer.begin_trace(
-                    f"run: {event.scenario_name}",
+                    f"run: {event.scenario_name} · {event.run_id[:8]}",
                     start_ns=event.at_ns,
                     **{
                         "openinference.span.kind": "AGENT",
+                        # input/output on the ROOT is what Phoenix's span list
+                        # and Langfuse's trace preview render — without them
+                        # both show "--"/null and the trace looks empty.
+                        "input.value": (
+                            f"{event.scenario_name} → {event.target} "
+                            f"({event.region}/{event.transport})"
+                        ),
                         "opkura.run_id": event.run_id,
                         "opkura.target": event.target,
                         "opkura.region": event.region,
@@ -137,6 +147,10 @@ class TracingObserver:
                         "llm.provider": event.provider or None,
                         "llm.token_count.prompt": event.prompt_tokens,
                         "llm.token_count.completion": event.completion_tokens,
+                        # Populated only under TRACE_CAPTURE_LLM_IO (see
+                        # events.Generation) — otherwise None and omitted.
+                        "input.value": event.prompt_text or None,
+                        "output.value": event.completion_text or None,
                         "opkura.role": event.role,
                     },
                 )
@@ -147,6 +161,10 @@ class TracingObserver:
                         end_ns=event.at_ns,
                         error=event.error or None,
                         **{
+                            "output.value": (
+                                f"{event.status} · passed={event.passed}"
+                                + (f" · {event.error}" if event.error else "")
+                            ),
                             "opkura.status": event.status,
                             "opkura.passed": event.passed,
                             "opkura.interaction_uuid": event.interaction_uuid or None,
