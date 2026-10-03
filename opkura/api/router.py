@@ -340,6 +340,46 @@ def list_runs(
     return page_envelope([run_to_dict(r) for r in rows], page, page_size, total)
 
 
+@router.get("/runs/{run_uuid}/recording")
+def get_run_recording(
+    run_uuid: uuid_mod.UUID,
+    name: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    """Stream a run's call recording (the same audio llm-studio offers on the
+    bot side). Voice runs store local paths under artifact_keys.recordings;
+    `name` picks one, else the first."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    row = session.execute(
+        select(Run).where(Run.run_uuid == run_uuid)
+    ).scalar_one_or_none()
+    if row is None:
+        raise api_error(404, "run_not_found", f"run {run_uuid} does not exist")
+    recordings = (row.artifact_keys or {}).get("recordings") or {}
+    if not recordings:
+        raise api_error(404, "no_recording", "this run has no recording")
+    if name is not None:
+        path = recordings.get(name)
+        if path is None:
+            raise api_error(
+                404, "recording_not_found",
+                f"no recording named {name!r}; available: {sorted(recordings)}",
+            )
+    else:
+        path = next(iter(recordings.values()))
+    file = Path(path)
+    if not file.is_file():
+        raise api_error(
+            410, "recording_gone",
+            f"recording file missing on disk: {file.name}",
+        )
+    media = "audio/wav" if file.suffix.lower() == ".wav" else "audio/mpeg"
+    return FileResponse(file, media_type=media, filename=file.name)
+
+
 @router.get("/runs/{run_uuid}")
 def get_run(run_uuid: uuid_mod.UUID, session: Session = Depends(get_session)) -> dict:
     row = session.execute(

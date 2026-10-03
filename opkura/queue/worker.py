@@ -358,6 +358,13 @@ class StageWorker:
             }
             run.interaction_uuid = result.interaction_uuid or run.interaction_uuid
             run.call_sid = getattr(result, "call_sid", None) or run.call_sid
+            artifact_keys: dict = {}
+            if getattr(result, "log_dir", None):
+                artifact_keys["log_dir"] = result.log_dir
+            if getattr(result, "recording_paths", None):
+                artifact_keys["recordings"] = dict(result.recording_paths)
+            if artifact_keys:
+                run.artifact_keys = artifact_keys
             run.status = "evaluating"          # slot freed; the judge is next
             session.commit()
 
@@ -452,6 +459,101 @@ class StageWorker:
             run.status = "completed" if ok else "failed"
             run.error = run.error or obs.get("error", "")
             run.finished_at = datetime.now(timezone.utc)
+            session.commit()
+        # Bot-side correlation happens HERE, not in converse: by settle the
+        # call has been over for a full evaluate stage, so OSV's post-call
+        # write has had time to land. Best-effort by design — a correlation
+        # miss must never fail a settled run.
+        try:
+            await self._correlate_voice(entry)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "voice correlation failed for %s: %s", entry.run_uuid, exc
+            )
+
+    async def _correlate_voice(self, entry: Entry) -> None:
+        """Resolve a voice run's opkura session id (== its run uuid, P6) to
+        the bot-side OSV interaction, exactly like job mode does — the
+        session id travels as the X-Opkura-Session-Id SIP header and comes
+        back in the interaction's own metadata. Text runs already carry
+        their interaction_uuid from the HTTP response; this is voice's
+        equivalent. Needs a Target row for the dialed number to know the
+        client_uuid; without one it logs and moves on."""
+        from datetime import timedelta
+
+        from opkura.db.models import Target
+
+        with Session(self.engine) as session:
+            run = self._load(session, entry)
+            if run is None or run.interaction_uuid or run.transport not in (
+                "sip", "pstn",
+            ):
+                return
+            # Queue runs carry the dialed number in the scenario body, not in
+            # config_snapshot (that "target" key is the CLI results shape).
+            target_number = (run.config_snapshot or {}).get("target", "")
+            if not target_number and run.scenario_id is not None:
+                srow = session.get(ScenarioRow, run.scenario_id)
+                if srow is not None:
+                    target_number = (srow.body or {}).get("target", "")
+            client_uuid = ""
+            row = None
+            if run.target_id is not None:
+                row = session.get(Target, run.target_id)
+            if row is None and target_number:
+                row = session.execute(
+                    select(Target).where(Target.phone_number == target_number)
+                ).scalars().first()
+            if row is not None:
+                client_uuid = row.client_uuid or ""
+            if not client_uuid:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "voice correlation skipped for %s: no Target row with a "
+                    "client_uuid for %r", run.run_uuid, target_number,
+                )
+                return
+            started = run.started_at or run.created_at
+            finished = run.finished_at or datetime.now(timezone.utc)
+            run_uuid = str(run.run_uuid)
+
+        from opkura.jobs.pipeline import find_interaction_by_session_id
+
+        # OSV's post-call write can lag the hangup by seconds — one retry
+        # inside the lease window covers the common case; a persistent miss
+        # stays a miss (best-effort, never blocks settling).
+        match = None
+        for attempt in range(2):
+            match = await find_interaction_by_session_id(
+                client_uuid=client_uuid,
+                session_id=run_uuid,
+                assistant_id=None,
+                window_start=started - timedelta(minutes=5),
+                window_end=finished + timedelta(minutes=5),
+                caller_id=self.settings.twilio_phone_number,
+            )
+            if match or attempt == 1:
+                break
+            await asyncio.sleep(10)
+        if not match:
+            return
+        with Session(self.engine) as session:
+            run = self._load(session, entry)
+            if run is None:
+                return
+            run.interaction_uuid = str(match.get("uuid") or "") or None
+            # The web console builds the llm-studio deep link from
+            # config_snapshot.client_uuid — stamp it alongside.
+            snap = dict(run.config_snapshot or {})
+            snap["client_uuid"] = client_uuid
+            if match.get("disposition"):
+                obs = dict(run.observations or {})
+                obs["disposition"] = match.get("disposition")
+                run.observations = obs
+            run.config_snapshot = snap
             session.commit()
 
 
