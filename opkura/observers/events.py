@@ -53,7 +53,11 @@ class CallerTurn:
 
 @dataclass(frozen=True)
 class Generation:
-    """One LLM call, measured by whoever made it."""
+    """One LLM call, measured by whoever made it.
+
+    prompt_text / completion_text stay EMPTY unless TRACE_CAPTURE_LLM_IO is
+    set — prompts embed resolved variables, and traces must not become a
+    PII side channel by default. A local debugging stack opts in."""
 
     role: str  # "caller" | "evaluator"
     model: str
@@ -63,6 +67,8 @@ class Generation:
     error: Optional[str] = None
     started_ns: int = 0
     ended_ns: int = 0
+    prompt_text: str = ""
+    completion_text: str = ""
 
 
 @dataclass(frozen=True)

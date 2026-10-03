@@ -155,8 +155,29 @@ def _install_queue_services(app: FastAPI, state: V3State) -> None:
         except (asyncio.TimeoutError, Exception):
             services["housekeeper"].cancel()
 
-    app.add_event_handler("startup", _start)
-    app.add_event_handler("shutdown", _stop)
+    # Starlette 1.0 removed add_event_handler (the startup/shutdown event API
+    # is gone — lifespan only), and the defensive mount in transport/server.py
+    # turned that AttributeError into a one-line warning while the routes kept
+    # working: the API answered but nothing consumed converse-voice. Wrap the
+    # app's existing lifespan instead; keep the old path for older Starlette.
+    if hasattr(app, "add_event_handler"):
+        app.add_event_handler("startup", _start)
+        app.add_event_handler("shutdown", _stop)
+    else:
+        from contextlib import asynccontextmanager
+
+        existing = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def _lifespan(app_):
+            async with existing(app_):
+                await _start()
+                try:
+                    yield
+                finally:
+                    await _stop()
+
+        app.router.lifespan_context = _lifespan
 
 
 def get_state(request: Request) -> V3State:

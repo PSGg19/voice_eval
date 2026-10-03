@@ -77,7 +77,7 @@ class FakeRunner:
         self.crash = crash
         self.judged = judged if judged is not None else []
 
-    async def run_scenario(self, scenario):
+    async def run_scenario(self, scenario, *, run_id=None):
         if self.crash:
             raise RuntimeError("transport exploded")
         result = CallResult(

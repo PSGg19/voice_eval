@@ -80,13 +80,13 @@ def test_one_run_is_one_trace_in_phoenix_and_langfuse(monkeypatch):
     trace = None
     for _ in range(30):
         r = httpx.get(f"{LANGFUSE}/api/public/traces",
-                      params={"name": f"run: {marker}"}, auth=LF_AUTH, timeout=10)
+                      params={"name": f"run: {marker} · {marker[:8]}"}, auth=LF_AUTH, timeout=10)
         data = r.json().get("data", [])
         if data:
             trace = data[0]
             break
         time.sleep(2)
-    assert trace is not None, f"trace 'run: {marker}' never appeared in Langfuse"
+    assert trace is not None, f"trace 'run: {marker} · {marker[:8]}' never appeared in Langfuse"
     # root + bot turn + caller turn + generation = 4 observations
     assert len(trace["observations"]) >= 4
 
