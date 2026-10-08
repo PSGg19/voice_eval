@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from opkura.persistence.logwriter import CallLogWriter, slugify
-from opkura.core.models import (
+from vjudge.persistence.logwriter import CallLogWriter, slugify
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationCriterion,

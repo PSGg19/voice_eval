@@ -16,7 +16,7 @@ logs/
 # Never commit anything under here.
 #
 # LEADING SLASH IS LOAD-BEARING: a bare `jobs/` matches a directory of that name
-# at ANY depth, which silently excluded the job-mode SOURCE at `opkura/jobs/`.
+# at ANY depth, which silently excluded the job-mode SOURCE at `vjudge/jobs/`.
 # `/jobs/` anchors it to the repo root, which is the only place artifacts land.
 /jobs/
 # Client bot prompts — confidential per-client IP.

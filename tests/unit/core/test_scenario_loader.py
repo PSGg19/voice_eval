@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from opkura.core.scenario_loader import load
+from vjudge.core.scenario_loader import load
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -117,7 +117,7 @@ def test_barge_in_disabled_parses_to_disabled_config(tmp_path):
     """barge_in present but enabled: false → parsed BargeInConfig with
     enabled=False, mode/triggers untouched. Engine treats this as 'off'.
     """
-    from opkura.core.models import BargeInConfig
+    from vjudge.core.models import BargeInConfig
 
     p = _write(
         tmp_path,

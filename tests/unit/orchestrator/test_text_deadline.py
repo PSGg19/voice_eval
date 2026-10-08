@@ -12,13 +12,13 @@ import time
 
 import pytest
 
-from opkura.core.config import Settings
-from opkura.core.models import CallStatus, Scenario
-from opkura.core.region_profile import RegionProfile
-from opkura.core.run_context import Limits, Ports, RunContext
-from opkura.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS
-from opkura.llm.base import LLMResult
-from opkura.orchestrator.runner import TestRunner
+from vjudge.core.config import Settings
+from vjudge.core.models import CallStatus, Scenario
+from vjudge.core.region_profile import RegionProfile
+from vjudge.core.run_context import Limits, Ports, RunContext
+from vjudge.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS
+from vjudge.llm.base import LLMResult
+from vjudge.orchestrator.runner import TestRunner
 
 
 class _Turn:

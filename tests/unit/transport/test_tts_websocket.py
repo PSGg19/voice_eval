@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from opkura.transport.tts import DEEPGRAM_TTS_WS_URL, DeepgramWebSocketTTS
+from vjudge.transport.tts import DEEPGRAM_TTS_WS_URL, DeepgramWebSocketTTS
 
 
 class _FakeWS:
@@ -77,7 +77,7 @@ async def test_synthesize_stream_opens_fresh_when_no_prewarm():
 
     expected_frames = [b"\xaa" * 100, b"\xbb" * 200]
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -114,7 +114,7 @@ async def test_prewarm_opens_ws_and_synthesize_consumes_it():
         connect_call_count += 1
         return prewarmed_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
         await tts.prewarm()
         assert connect_call_count == 1
         assert tts._prewarmed_ws is prewarmed_ws
@@ -151,7 +151,7 @@ async def test_prewarm_is_idempotent():
         connect_call_count += 1
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
         await tts.prewarm()
         await tts.prewarm()  # second call — no-op
         await tts.prewarm()  # third call — still no-op
@@ -175,7 +175,7 @@ async def test_prewarm_failure_is_swallowed():
             raise ConnectionError("simulated prewarm failure")
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
         # Prewarm fails silently.
         await tts.prewarm()
         assert tts._prewarmed_ws is None
@@ -206,7 +206,7 @@ async def test_synthesize_stream_sends_speak_then_flush():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -234,7 +234,7 @@ async def test_synthesize_stream_empties_skipped_keepalive_frames():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -264,7 +264,7 @@ async def test_synthesize_stream_terminates_on_connection_closed_mid_stream():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -291,7 +291,7 @@ async def test_close_cleans_up_prewarmed_ws():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
         await tts.prewarm()
         assert tts._prewarmed_ws is fake_ws
 
@@ -322,7 +322,7 @@ async def test_synthesize_stream_terminates_on_any_unknown_json_message():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -354,7 +354,7 @@ async def test_metadata_and_warning_do_not_terminate_stream():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)
@@ -384,7 +384,7 @@ async def test_recv_handles_malformed_json_without_crashing():
     async def fake_connect(*_args, **_kwargs):
         return fake_ws
 
-    with patch("opkura.transport.tts.websockets.connect", side_effect=fake_connect):
+    with patch("vjudge.transport.tts.websockets.connect", side_effect=fake_connect):
 
         async def producer():
             await asyncio.sleep(0.01)

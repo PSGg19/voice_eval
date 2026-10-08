@@ -16,9 +16,9 @@ from fakeredis import aioredis as fakeaioredis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from opkura.db.models import Run, RunBatch
-from opkura.queue.dispatch import QueueExecutor, redispatch_stuck
-from opkura.queue.streams import StageQueue
+from vjudge.db.models import Run, RunBatch
+from vjudge.queue.dispatch import QueueExecutor, redispatch_stuck
+from vjudge.queue.streams import StageQueue
 
 
 @pytest_asyncio.fixture

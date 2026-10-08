@@ -1,4 +1,4 @@
-"""Unit tests for opkura.core.campaign_loader.
+"""Unit tests for vjudge.core.campaign_loader.
 
 Covers schema validation (required keys, type checks, bounds),
 glob expansion (relative paths, globs, deduplication), and
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from opkura.core.campaign_loader import DEFAULT_MAX_CONCURRENCY, load
+from vjudge.core.campaign_loader import DEFAULT_MAX_CONCURRENCY, load
 
 
 def _write(path: Path, content: str) -> None:

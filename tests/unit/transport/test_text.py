@@ -1,7 +1,7 @@
 """Unit tests for the text transport (`call_transport="text"`).
 
 Hermetic: no HTTP, no OSV, no LLM. `httpx.AsyncClient.post` is patched so the
-tests assert on the request opkura *builds* and how it interprets the reply.
+tests assert on the request vjudge *builds* and how it interprets the reply.
 
 The behaviours pinned here are the ones observed live against the text runtime
 on 2026-08-05 — see docs/dual-transport.md:
@@ -21,9 +21,9 @@ from unittest.mock import patch
 
 import pytest
 
-from opkura.core.config import Settings
-from opkura.core.models import LLMConfig, STTConfig, Scenario, TTSConfig
-from opkura.transport.text import (
+from vjudge.core.config import Settings
+from vjudge.core.models import LLMConfig, STTConfig, Scenario, TTSConfig
+from vjudge.transport.text import (
     TextTransport,
     TextTransportError,
     resolve_recipient_id,
@@ -33,13 +33,13 @@ from opkura.transport.text import (
 def _make_settings(**overrides) -> Settings:
     base = dict(
         # Hermetic — otherwise a developer .env carrying
-        # AUTOCALLS_CALL_TRANSPORT=sip or a real token leaks into assertions.
+        # VJUDGE_CALL_TRANSPORT=sip or a real token leaks into assertions.
         _env_file=None,
         twilio_account_sid="AC_test",
         twilio_auth_token="token_test",
         twilio_phone_number="+10000000000",
         deepgram_api_key="dg_test",
-        public_url="https://opkura.example.com",
+        public_url="https://vjudge.example.com",
         call_transport="text",
     )
     base.update(overrides)
@@ -75,8 +75,8 @@ def _reply(**overrides) -> dict:
         "interaction_uuid": "7ca583dd-f874-4bc4-8e7f-6996c7bf9cec",
         "client_uuid": "bce86fb8-4d25-4f90-8211-186c1e82f2e6",
         "interaction_metadata": {
-            "llm_studio_url": "https://llm-studio.skit.ai/clients/x/conversations?interaction_uuid=y",
-            "grafana_url": "https://grafana.us.skit.ai/explore?x=1",
+            "llm_studio_url": "https://llm-studio.vjudge.dev/clients/x/conversations?interaction_uuid=y",
+            "grafana_url": "https://grafana.us.vjudge.dev/explore?x=1",
         },
         "is_test": True,
     }
@@ -119,14 +119,14 @@ def _dumps(obj) -> str:
 
 def test_recipient_id_comes_from_the_scenario_verbatim():
     """No normalisation. It is compared byte-for-byte against
-    Account.phone_number, so opkura must not "helpfully" reformat it."""
+    Account.phone_number, so vjudge must not "helpfully" reformat it."""
     assert resolve_recipient_id(_make_scenario(recipient_id="7145551212")) == "7145551212"
     assert resolve_recipient_id(_make_scenario(recipient_id="a@b.com")) == "a@b.com"
 
 
 def test_missing_recipient_id_is_a_hard_error():
     """It becomes the bot's phone_number and reaches the client's CRM, so a
-    generated value is a value opkura invented into someone's records. An
+    generated value is a value vjudge invented into someone's records. An
     earlier default slug did exactly that, reaching a production workflow API."""
     with pytest.raises(TextTransportError, match="recipient_id"):
         resolve_recipient_id(_make_scenario(recipient_id=None))
@@ -438,7 +438,7 @@ _NO_ASSISTANT = (
 
 def _in_region_transport(region=None):
     return TextTransport(
-        _make_settings(text_runtime_base_url="https://llm-studio.skit.ai/in/api/text"),
+        _make_settings(text_runtime_base_url="https://llm-studio.vjudge.dev/in/api/text"),
         _make_scenario(region=region),
         "sess1234abcd",
     )
@@ -455,7 +455,7 @@ def test_a_404_on_the_wrong_region_says_so_instead_of_blaming_the_uuid():
 
     assert "REGION MISROUTE" in hint
     assert "`in` gateway" in hint  # the region actually used
-    assert "AUTOCALLS_TEXT_RUNTIME_BASE_URL" in hint
+    assert "VJUDGE_TEXT_RUNTIME_BASE_URL" in hint
     assert "EXPORTED variable silently outranks .env" in hint
     assert 'region: "<us|in|ca>"' in hint  # the fix, copy-pasteable
     assert "an IN gateway" in hint  # not "a IN gateway"
@@ -467,7 +467,7 @@ def test_when_the_scenario_pins_the_region_the_advice_is_to_change_that_key():
 
     assert 'the scenario\'s `region: "in"`' in hint
     assert "change that key" in hint
-    assert "AUTOCALLS_TEXT_RUNTIME_BASE_URL" not in hint  # not the culprit here
+    assert "VJUDGE_TEXT_RUNTIME_BASE_URL" not in hint  # not the culprit here
 
 
 @pytest.mark.parametrize(
@@ -496,8 +496,8 @@ def test_no_region_hint_when_the_url_has_no_region_segment():
 def test_scenario_region_overrides_an_exported_base_url():
     """The whole point of the key: it must beat the environment, not defer to it."""
     transport = TextTransport(
-        _make_settings(text_runtime_base_url="https://llm-studio.skit.ai/in/api/text"),
+        _make_settings(text_runtime_base_url="https://llm-studio.vjudge.dev/in/api/text"),
         _make_scenario(region="us"),
         "sess1234abcd",
     )
-    assert transport.base_url == "https://llm-studio.skit.ai/us/api/text"
+    assert transport.base_url == "https://llm-studio.vjudge.dev/us/api/text"

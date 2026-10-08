@@ -16,9 +16,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from opkura.api import install_v3
-from opkura.core.config import Settings
-from opkura.db.engine import sync_engine
+from vjudge.api import install_v3
+from vjudge.core.config import Settings
+from vjudge.db.engine import sync_engine
 
 
 def build_schema() -> dict:
@@ -29,7 +29,7 @@ def build_schema() -> dict:
         twilio_phone_number="+15550000000",
         deepgram_api_key="schema-export",
     )
-    app = FastAPI(title="Opkura V3 API", version="3.0.0")
+    app = FastAPI(title="VJudge V3 API", version="3.0.0")
     install_v3(
         app,
         settings=settings,

@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from opkura.voice.frames import CallEnded, CallStarted, InboundAudio
-from opkura.voice.processor import Chain, Processor
+from vjudge.voice.frames import CallEnded, CallStarted, InboundAudio
+from vjudge.voice.processor import Chain, Processor
 
 
 async def run_processor(processor: Processor, frames: list, *,

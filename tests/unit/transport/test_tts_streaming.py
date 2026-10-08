@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from opkura.transport.tts import DEEPGRAM_TTS_URL, DeepgramTTS
+from vjudge.transport.tts import DEEPGRAM_TTS_URL, DeepgramTTS
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,7 @@ async def test_synthesize_stream_propagates_http_errors():
 @pytest.mark.asyncio
 async def test_blocking_synthesize_still_works():
     """Regression: the original synthesize() must still function for
-    fallback when AUTOCALLS_STREAMING_TTS=false."""
+    fallback when VJUDGE_STREAMING_TTS=false."""
     tts = DeepgramTTS(api_key="k-test")
 
     fake_response = MagicMock()

@@ -11,7 +11,7 @@ import os, sys
 os.environ["TRACING_PROVIDER"] = "none"
 os.environ.pop("PHOENIX_ENABLED", None)
 os.environ.pop("LANGFUSE_ENABLED", None)
-from opkura.observers import build_observers
+from vjudge.observers import build_observers
 observers = build_observers()
 assert observers == [], f"expected no observers, got {observers}"
 polluted = [m for m in sys.modules if m.startswith("opentelemetry")]

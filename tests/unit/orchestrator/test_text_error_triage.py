@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-from opkura.core.models import CallStatus, Scenario
-from opkura.core.region_profile import RegionProfile
-from opkura.core.run_context import Limits, Ports, RunContext
-from opkura.llm.base import LLMResult
-from opkura.orchestrator.runner import TestRunner
-from opkura.transport.text import TextTransportError
+from vjudge.core.models import CallStatus, Scenario
+from vjudge.core.region_profile import RegionProfile
+from vjudge.core.run_context import Limits, Ports, RunContext
+from vjudge.llm.base import LLMResult
+from vjudge.orchestrator.runner import TestRunner
+from vjudge.transport.text import TextTransportError
 
 
 class FakeBotTurn:

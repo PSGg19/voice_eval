@@ -15,9 +15,9 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from opkura.core.config import Settings
-from opkura.queue.registry import WorkerRegistry
-from opkura.transport.call import CallManager
+from vjudge.core.config import Settings
+from vjudge.queue.registry import WorkerRegistry
+from vjudge.transport.call import CallManager
 
 
 @pytest_asyncio.fixture

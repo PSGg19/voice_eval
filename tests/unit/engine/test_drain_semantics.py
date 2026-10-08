@@ -13,17 +13,17 @@ import time
 
 import pytest
 
-from opkura.core.models import Scenario
-from opkura.engine.caller import AICallerEngine
-from opkura.engine.conversation import ConversationEngine, Termination
-from opkura.frames import (
+from vjudge.core.models import Scenario
+from vjudge.engine.caller import AICallerEngine
+from vjudge.engine.conversation import ConversationEngine, Termination
+from vjudge.frames import (
     BotFinalSpeech,
     BotTurnEnded,
     CallerSpeech,
     ControlCancelled,
     ControlStarted,
 )
-from opkura.llm.base import LLMResult
+from vjudge.llm.base import LLMResult
 
 
 def make_scenario() -> Scenario:

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Start the whole opkura dev stack, in order, with health checks:
+# Start the whole vjudge dev stack, in order, with health checks:
 #
-#   1. cloudflared quick tunnel  → rewrites AUTOCALLS_PUBLIC_URL in .env
+#   1. cloudflared quick tunnel  → rewrites VJUDGE_PUBLIC_URL in .env
 #      (Twilio must reach the media websocket; the URL changes every start)
-#   2. opkura serve   (:8765 — API + embedded voice worker)
-#   3. opkura worker  (queue worker: converse-text / evaluate / settle)
-#   4. opkura-web     (:3400 — the console)
+#   2. vjudge serve   (:8765 — API + embedded voice worker)
+#   3. vjudge worker  (queue worker: converse-text / evaluate / settle)
+#   4. vjudge-web     (:3400 — the console)
 #
 #   ./scripts/start.sh          start everything
 #   ./scripts/stop.sh           stop everything
@@ -32,15 +32,15 @@ for i in $(seq 1 20); do
   sleep 1
 done
 [ -n "$URL" ] || { echo "tunnel never printed a URL — see .dev/tunnel.log"; exit 1; }
-sed -i '' "s|^AUTOCALLS_PUBLIC_URL=.*|AUTOCALLS_PUBLIC_URL=$URL|" .env
+sed -i '' "s|^VJUDGE_PUBLIC_URL=.*|VJUDGE_PUBLIC_URL=$URL|" .env
 echo "   $URL  (written to .env)"
 
 # ----------------------------------------------------------------- backend
-say "opkura serve (:8765) + worker"
+say "vjudge serve (:8765) + worker"
 # shellcheck disable=SC1090
-source "$HOME/.opkura-obs.env"   # LOG_SINK / PHOENIX / LANGFUSE / TRACE_CAPTURE
-nohup .venv/bin/python -m opkura serve  > .dev/serve.log  2>&1 < /dev/null & echo $! > .dev/serve.pid
-nohup .venv/bin/python -m opkura worker > .dev/worker.log 2>&1 < /dev/null & echo $! > .dev/worker.pid
+source "$HOME/.vjudge-obs.env"   # LOG_SINK / PHOENIX / LANGFUSE / TRACE_CAPTURE
+nohup .venv/bin/python -m vjudge serve  > .dev/serve.log  2>&1 < /dev/null & echo $! > .dev/serve.pid
+nohup .venv/bin/python -m vjudge worker > .dev/worker.log 2>&1 < /dev/null & echo $! > .dev/worker.pid
 for i in $(seq 1 20); do
   curl -sf --max-time 3 localhost:8765/health >/dev/null 2>&1 && break; sleep 1
 done
@@ -48,15 +48,15 @@ curl -sf --max-time 3 localhost:8765/health >/dev/null || { echo "API never came
 echo "   api healthy; worker registering"
 
 # --------------------------------------------------------------------- web
-say "opkura-web (:3400)"
-if [ -d ../opkura-web ]; then
-  (cd ../opkura-web && nohup npm run start > ../opkura/.dev/web.log 2>&1 < /dev/null & echo $! > ../opkura/.dev/web.pid)
+say "vjudge-web (:3400)"
+if [ -d ../vjudge-web ]; then
+  (cd ../vjudge-web && nohup npm run start > ../vjudge/.dev/web.log 2>&1 < /dev/null & echo $! > ../vjudge/.dev/web.pid)
   for i in $(seq 1 15); do
     curl -sf --max-time 3 -o /dev/null localhost:3400/ 2>/dev/null && break; sleep 1
   done
   echo "   console: http://localhost:3400"
 else
-  echo "   ../opkura-web not found — skipped"
+  echo "   ../vjudge-web not found — skipped"
 fi
 
 say "up"

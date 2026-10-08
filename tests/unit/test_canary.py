@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import asyncio
 
-from opkura.canary import run_canary
-from opkura.core.models import CallResult, CallStatus, EvaluationResult
-from opkura.observers.metrics_observer import CANARY_PASSED
+from vjudge.canary import run_canary
+from vjudge.core.models import CallResult, CallStatus, EvaluationResult
+from vjudge.observers.metrics_observer import CANARY_PASSED
 
 
 class FakeRunner:

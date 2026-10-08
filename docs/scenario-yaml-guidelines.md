@@ -285,7 +285,7 @@ Every eval response should prefix `overall_reasoning` with one of:
 
 - `"PASS: ..."`
 - `"BOT FAILURE: ..."`
-- `"OPKURA TRUNCATION: ..."` (transcript cut mid-bot-response; bot
+- `"VJUDGE TRUNCATION: ..."` (transcript cut mid-bot-response; bot
   likely did the right thing but we missed it)
 - `"TEST/LLM FAILURE: ..."` (caller LLM cut off bot, gave wrong values,
   hung up early)
@@ -294,7 +294,7 @@ Every eval response should prefix `overall_reasoning` with one of:
 
 This makes triage trivial: 80% of failures fall into "BOT FAILURE" or
 "PROMPT GAP", which routes to the bot team. Truncation flakes are
-opkura/infra issues. Test/LLM failures are scenario-side fixes.
+vjudge/infra issues. Test/LLM failures are scenario-side fixes.
 
 ---
 

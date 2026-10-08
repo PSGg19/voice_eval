@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from opkura.core.config import Settings
-from opkura.transport.call import CallManager
+from vjudge.core.config import Settings
+from vjudge.transport.call import CallManager
 
 
 def make_settings() -> Settings:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from opkura.services.osv.conversations import (
+from vjudge.services.osv.conversations import (
     OsvTurn,
     flatten_tool_calls,
     parse_conversations,
@@ -128,7 +128,7 @@ def test_is_tag_only(text, expected):
 
 def test_the_veros_ib2_failure_shape():
     """The exact stall: the SSN lands, the bot replies with a bare <LANG:en-US>,
-    OSV strips it, and opkura's caller hears silence for ~300s.
+    OSV strips it, and vjudge's caller hears silence for ~300s.
     """
     turns = parse_conversations(
         {

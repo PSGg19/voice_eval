@@ -5,12 +5,12 @@ Generate the SBI YONO tool-call load test: N copies of the multi-hop
 concurrently. N distinct files are needed because the campaign loader dedupes
 scenario paths (the same file listed N times collapses to one call).
 
-Usage (from repo root, opkura/):
+Usage (from repo root, vjudge/):
     python scripts/gen_sbi_toolcall_loadtest.py        # default N=5
     python scripts/gen_sbi_toolcall_loadtest.py 20     # 20 concurrent copies
 
 Then run (places REAL outbound calls to +918062123187):
-    opkura campaign clients/sbi/yono-general/campaigns/full-suite.yaml -m 5
+    vjudge campaign clients/sbi/yono-general/campaigns/full-suite.yaml -m 5
 """
 import re
 import sys
@@ -58,8 +58,8 @@ def main() -> None:
 # This exercises the streamed tool-call path (the json.loads accumulator fix) on
 # the SBI YONO bot (Gemma/Modal) under concurrency. Bot under test: +918062123187.
 # Every run places REAL outbound calls.
-#   opkura campaign {CAMPAIGN} -m 1     # validate with one
-#   opkura campaign {CAMPAIGN} -m {N}     # fire all {N} concurrently
+#   vjudge campaign {CAMPAIGN} -m 1     # validate with one
+#   vjudge campaign {CAMPAIGN} -m {N}     # fire all {N} concurrently
 #
 # Change the count:  python scripts/gen_sbi_toolcall_loadtest.py <N>
 # =============================================================================

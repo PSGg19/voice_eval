@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from opkura.core.models import CallResult
-from opkura.transport.stream import (
+from vjudge.core.models import CallResult
+from vjudge.transport.stream import (
     DTMFReconnectTimeoutError,
     DTMFRedirectAbortedError,
     DTMFRedirectFailedError,
@@ -46,7 +46,7 @@ def _make_session(
         tts_transport="blocking",
         call_manager=call_mgr,
         session_id="sess_abc",
-        reconnect_ws_url="wss://opkura.example.com/ws/sess_abc",
+        reconnect_ws_url="wss://vjudge.example.com/ws/sess_abc",
         dtmf_transport=transport,
         dtmf_reconnect_timeout_s=timeout_s,
     )
@@ -84,7 +84,7 @@ async def test_send_dtmf_rest_pauses_calls_twilio_and_waits():
     kwargs = call_mgr.play_dtmf_and_reconnect.call_args.kwargs
     assert kwargs["call_sid"] == "CA_test_sid"
     assert kwargs["digits"] == "4012000033330125"
-    assert kwargs["reconnect_ws_url"] == "wss://opkura.example.com/ws/sess_abc"
+    assert kwargs["reconnect_ws_url"] == "wss://vjudge.example.com/ws/sess_abc"
     # State is back to normal after a successful round trip.
     assert s._in_transition is False
     # Audio path was NOT used.

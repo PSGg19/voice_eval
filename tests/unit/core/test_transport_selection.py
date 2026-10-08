@@ -6,7 +6,7 @@ Three layers are pinned here:
   * lint rejects a bad value AND an impossible combination (barge + text)
   * the runner prefers the scenario's transport over the deployment default
 
-The last one is the point of the feature: `AUTOCALLS_CALL_TRANSPORT` stays the
+The last one is the point of the feature: `VJUDGE_CALL_TRANSPORT` stays the
 default for scenarios that don't care, while a barge scenario can pin itself to
 audio and a reasoning scenario to text — without anyone remembering to export a
 variable.
@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from opkura.core.config import Settings
-from opkura.core.lint import lint_scenario
-from opkura.core.scenario_loader import ALLOWED_TRANSPORTS, _parse_transport
-from opkura.core.scenario_loader import load as load_scenario
+from vjudge.core.config import Settings
+from vjudge.core.lint import lint_scenario
+from vjudge.core.scenario_loader import ALLOWED_TRANSPORTS, _parse_transport
+from vjudge.core.scenario_loader import load as load_scenario
 
 SCENARIO = """\
 name: "transport selection fixture"
@@ -166,7 +166,7 @@ def _settings(transport: str) -> Settings:
         twilio_auth_token="token_test",
         twilio_phone_number="+10000000000",
         deepgram_api_key="dg_test",
-        public_url="https://opkura.example.com",
+        public_url="https://vjudge.example.com",
         call_transport=transport,
     )
     if transport == "sip":
@@ -227,7 +227,7 @@ def test_lint_flags_a_non_boolean_is_test(tmp_path):
 
 
 def test_lint_flags_is_test_on_a_voice_transport(tmp_path):
-    """The voice path carries the intent as a SIP header opkura sets itself, so
+    """The voice path carries the intent as a SIP header vjudge sets itself, so
     the key would be silently ignored."""
     result = lint_scenario(
         _write(tmp_path, '\ntransport: "sip"\nis_test: true\n')
@@ -250,7 +250,7 @@ def test_lint_allows_is_test_with_no_pinned_transport(tmp_path):
 
 
 def test_job_config_carries_a_transport():
-    from opkura.jobs.models import JobConfig
+    from vjudge.jobs.models import JobConfig
 
     assert JobConfig(target="+18445550000").transport is None
     assert JobConfig(target="+18445550000", transport="text").transport == "text"
@@ -258,7 +258,7 @@ def test_job_config_carries_a_transport():
 
 def test_generator_stamps_transport_onto_the_scenario_doc():
     """So a generated scenario records what it ran on, not the server's env."""
-    from opkura.jobs.generator import normalise_doc
+    from vjudge.jobs.generator import normalise_doc
 
     doc, changed = normalise_doc({"name": "x"}, target="+18445550000", transport="text")
     assert doc["transport"] == "text"
@@ -274,19 +274,19 @@ def test_generator_stamps_transport_onto_the_scenario_doc():
 
 
 def test_resolve_settings_none_leaves_the_env_default_alone(monkeypatch):
-    from opkura.cli.main import resolve_settings
+    from vjudge.cli.main import resolve_settings
 
-    monkeypatch.setenv("AUTOCALLS_CALL_TRANSPORT", "text")
+    monkeypatch.setenv("VJUDGE_CALL_TRANSPORT", "text")
     assert resolve_settings(None).call_transport == "text"
 
 
 def test_resolve_settings_flag_overrides_the_env_default(monkeypatch):
     """`--transport text` on a sip deployment, without editing .env."""
-    from opkura.cli.main import resolve_settings
+    from vjudge.cli.main import resolve_settings
 
-    monkeypatch.setenv("AUTOCALLS_CALL_TRANSPORT", "sip")
-    monkeypatch.setenv("AUTOCALLS_SIP_DESTINATION_HOST", "x.sip.livekit.cloud:5060")
-    monkeypatch.setenv("AUTOCALLS_SIP_TRUNK_NUMBER", "1205")
+    monkeypatch.setenv("VJUDGE_CALL_TRANSPORT", "sip")
+    monkeypatch.setenv("VJUDGE_SIP_DESTINATION_HOST", "x.sip.livekit.cloud:5060")
+    monkeypatch.setenv("VJUDGE_SIP_TRUNK_NUMBER", "1205")
     assert resolve_settings("text").call_transport == "text"
     # Case and whitespace tolerated, same as the YAML parser.
     assert resolve_settings("  TEXT ").call_transport == "text"
@@ -296,7 +296,7 @@ def test_resolve_settings_flag_overrides_the_env_default(monkeypatch):
 def test_resolve_settings_rejects_an_unknown_transport(bad):
     """Exit code 2, not a traceback — it is a usage error."""
     import typer
-    from opkura.cli.main import resolve_settings
+    from vjudge.cli.main import resolve_settings
 
     with pytest.raises(typer.Exit) as exc:
         resolve_settings(bad)
@@ -309,7 +309,7 @@ def test_resolve_settings_flag_cannot_defeat_a_scenario_pin(tmp_path):
     A barge scenario pins sip because it needs audio. `--transport text` must
     not be able to reroute it, or lint's capability check is bypassed at will.
     """
-    from opkura.cli.main import resolve_settings
+    from vjudge.cli.main import resolve_settings
 
     scenario = load_scenario(_write(tmp_path, '\ntransport: "sip"\n'))
     settings = resolve_settings("text")
@@ -393,7 +393,7 @@ def test_lint_flags_a_bad_fc_version(tmp_path):
 
 def test_lint_requires_recipient_id_on_a_text_scenario(tmp_path):
     """Caught before anything is POSTed. OSV assigns recipient_id to the bot's
-    `phone_number`, from where it flows into integration payloads — so opkura
+    `phone_number`, from where it flows into integration payloads — so vjudge
     refuses to invent one, and a missing key must fail loudly rather than at
     turn 1."""
     result = lint_scenario(_write(tmp_path, '\ntransport: "text"\n'))
@@ -417,7 +417,7 @@ def test_lint_does_not_require_recipient_id_when_transport_is_unpinned(tmp_path)
 # --- declared metrics reach the Scenario ------------------------------------
 
 def test_metrics_parse_into_specs(tmp_path):
-    from opkura.core.scenario_loader import load
+    from vjudge.core.scenario_loader import load
 
     p = tmp_path / "s.yaml"
     p.write_text(
@@ -446,7 +446,7 @@ def test_metrics_parse_into_specs(tmp_path):
 
 
 def test_no_metrics_key_yields_an_empty_list(tmp_path):
-    from opkura.core.scenario_loader import load
+    from vjudge.core.scenario_loader import load
 
     p = tmp_path / "s.yaml"
     p.write_text(
@@ -458,7 +458,7 @@ def test_no_metrics_key_yields_an_empty_list(tmp_path):
 
 
 def test_type_defaults_to_string_and_is_lowercased(tmp_path):
-    from opkura.core.scenario_loader import load
+    from vjudge.core.scenario_loader import load
 
     p = tmp_path / "s.yaml"
     p.write_text(
