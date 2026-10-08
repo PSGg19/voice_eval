@@ -82,7 +82,36 @@ class TracingObserver:
     # --------------------------------------------------------------- writing
 
     def _replay(self, events: List[Any]) -> None:
+        """Write the buffered run as an OSV-style turn tree:
+
+            run: <scenario>
+            ├── turn 1                (group: input=bot line, output=reply)
+            │   ├── bot
+            │   ├── llm · caller
+            │   └── caller
+            ├── turn 2 …
+            └── llm · evaluator       (post-conversation, stays at root)
+
+        A turn group opens at a BotTurn and closes when its CallerTurn (or
+        the next BotTurn / RunFinished) arrives; caller-role generations in
+        between belong to the turn. Phoenix and Langfuse both render the
+        grouping as a collapsible tree — the OSV conversations dropdown."""
         root: Optional[Any] = None
+        group: Optional[Any] = None          # the open `turn N` span
+        group_end_ns: int = 0                # last child end inside the group
+        group_out: str = ""                  # the caller reply (group output)
+        last_bot_text = ""
+        last_caller_text = ""
+
+        def close_group() -> None:
+            nonlocal group, group_out
+            if group is not None:
+                self._tracer.end_span(
+                    group, end_ns=group_end_ns,
+                    **{"output.value": group_out or None},
+                )
+            group, group_out = None, ""
+
         for event in events:
             if isinstance(event, RunStarted):
                 # The short run id in the NAME is deliberate: Langfuse search
@@ -107,38 +136,58 @@ class TracingObserver:
                     },
                 )
             elif isinstance(event, BotTurn):
+                close_group()
                 start = (
                     event.at_ns - int(event.latency_ms * _MS)
                     if event.latency_ms
                     else event.at_ns
                 )
+                group = self._tracer.begin_span(
+                    f"turn {event.turn_index}",
+                    parent=root, start_ns=start,
+                    **{
+                        "openinference.span.kind": "CHAIN",
+                        "input.value": event.text,
+                    },
+                )
+                group_end_ns = event.at_ns
                 self._tracer.record_span(
-                    f"turn {event.turn_index} · bot",
-                    parent=root,
+                    "bot",
+                    parent=group,
                     start_ns=start,
                     end_ns=event.at_ns,
                     **{
+                        "input.value": last_caller_text or None,
                         "output.value": event.text,
                         "opkura.module": event.module or None,
                         "opkura.tag_only": event.tag_only or None,
                         "opkura.bot_latency_ms": event.latency_ms,
                     },
                 )
+                last_bot_text = event.text
             elif isinstance(event, CallerTurn):
                 self._tracer.record_span(
-                    f"turn {event.turn_index} · caller",
-                    parent=root,
+                    "caller",
+                    parent=group if group is not None else root,
                     start_ns=event.at_ns,
                     end_ns=event.at_ns + _MS,  # utterances are instants; 1ms renders
                     **{
+                        "input.value": last_bot_text or None,
                         "output.value": event.text,
                         "opkura.dtmf": event.dtmf or None,
                     },
                 )
+                last_caller_text = event.text
+                group_end_ns = max(group_end_ns, event.at_ns + _MS)
+                group_out = event.text
+                close_group()
             elif isinstance(event, Generation):
+                # Caller generations belong to the open turn; the evaluator
+                # (and anything outside a turn) stays at root.
+                parent = group if (group is not None and event.role == "caller") else root
                 self._tracer.record_generation(
                     f"llm · {event.role}",
-                    parent=root,
+                    parent=parent,
                     start_ns=event.started_ns,
                     end_ns=event.ended_ns,
                     model=event.model,
@@ -154,7 +203,10 @@ class TracingObserver:
                         "opkura.role": event.role,
                     },
                 )
+                if parent is group:
+                    group_end_ns = max(group_end_ns, event.ended_ns)
             elif isinstance(event, RunFinished):
+                close_group()
                 if root is not None:
                     self._tracer.end_trace(
                         root,
@@ -170,4 +222,5 @@ class TracingObserver:
                             "opkura.interaction_uuid": event.interaction_uuid or None,
                         },
                     )
+        close_group()
         self._tracer.flush()

@@ -26,6 +26,23 @@ Three ways to drive it:
 
 ## Setup
 
+**The fast path** — two scripts do everything (venv, deps, brew
+postgres/redis, DB + migrations, observability containers, Grafana
+datasource, the web console, and a test-suite sanity check):
+
+```bash
+./scripts/setup.sh     # one-time / after a pull (idempotent, runs migrations)
+./scripts/start.sh     # tunnel → API → worker → web console (localhost:3400)
+./scripts/stop.sh
+```
+
+Full walkthrough incl. troubleshooting: **[docs/local-dev.md](docs/local-dev.md)**.
+Using Claude Code? `CLAUDE.md` tells it how to set this up and drive it for you.
+A ready-made Postman collection lives in the sibling repo:
+`../postman/collections/opkura/`.
+
+The manual steps below explain what the scripts automate.
+
 ### 1. Python 3.11 or 3.12
 
 Not 3.13: `transport/vad.py` uses `audioop`, which PEP 594 removed from the

@@ -57,9 +57,15 @@ class _EngineTransport:
 
 class EngineBridge(Processor):
     def __init__(self, conversation: ConversationEngine,
-                 name: str = "engine", **kw):
+                 name: str = "engine", dispatcher=None, **kw):
         super().__init__(name, **kw)
         self.conversation = conversation
+        # The runner's observer dispatcher. The chain runs under the SERVER's
+        # websocket task tree, which never inherited the runner's ContextVar —
+        # without re-installing it here, every turn/generation event the
+        # engine emits during a voice call is a silent no-op (text runs kept
+        # their spans; voice traces were bare roots).
+        self.dispatcher = dispatcher
         self.outcome: Optional[ConversationOutcome] = None
         self.hangup_delivered = False
         self._engine_inbox: asyncio.Queue = asyncio.Queue()
@@ -69,6 +75,10 @@ class EngineBridge(Processor):
         self._drive_task = self.spawn(self._drive(), name="conversation")
 
     async def _drive(self) -> None:
+        if self.dispatcher is not None:
+            from opkura.observers.dispatcher import install_dispatcher
+
+            install_dispatcher(self.dispatcher)
         self.outcome = await self.conversation.run(_EngineTransport(self))
         logger.info("engine settled: termination=%s",
                     self.outcome.termination)

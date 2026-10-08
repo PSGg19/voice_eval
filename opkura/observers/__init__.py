@@ -105,9 +105,12 @@ class ObservedLLM:
                 "1", "true", "on", "yes",
             ):
                 prompt_text = _render_llm_io(args, kwargs)
-                data = getattr(result, "data", None)
-                if data is not None:
-                    completion_text = _clip(json.dumps(data, default=str))
+                # LLMResult IS the parsed JSON mapping (a dict subclass) —
+                # there is no .data attribute.
+                if isinstance(result, dict):
+                    completion_text = _clip(json.dumps(dict(result), default=str))
+                elif result is not None:
+                    completion_text = _clip(str(result))
             emit(
                 Generation(
                     role=self._role,

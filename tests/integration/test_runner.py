@@ -36,7 +36,12 @@ def _runner_with(settings_overrides: dict) -> TestRunner:
     with patch("opkura.orchestrator.runner.CallManager"), \
          patch("opkura.orchestrator.runner.DeepgramTTS"), \
          patch("opkura.orchestrator.runner.PgResultStore"):
-        return TestRunner(settings)
+        # persist_result=False matters more than the PgResultStore patch
+        # above: `TestRunner.store` is LAZY, so the store is constructed at
+        # save time — after this patch context has exited — and every run
+        # that reached persistence wrote a junk `t` row into the REAL
+        # database (one per suite run, "gemini not configured", 0s).
+        return TestRunner(settings, persist_result=False)
 
 
 def test_detect_schema_rejects_hybrid_yaml(tmp_path):

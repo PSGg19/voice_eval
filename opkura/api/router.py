@@ -369,7 +369,8 @@ def get_run_recording(
                 f"no recording named {name!r}; available: {sorted(recordings)}",
             )
     else:
-        path = next(iter(recordings.values()))
+        # Default to the dual-channel conversation file when present.
+        path = recordings.get("mixed") or next(iter(recordings.values()))
     file = Path(path)
     if not file.is_file():
         raise api_error(

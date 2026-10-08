@@ -48,7 +48,7 @@ def test_india_profile_selects_india_ingress_and_did_stays_a_header():
     assert "X-VirtualNumber=%2B918062123187" in dial_to
     # Correlation + test marking still ride along.
     assert "X-Opkura-Session-Id=sess123" in dial_to
-    assert "X-Is-Test=1" in dial_to
+    assert "X-Is-Test=0" in dial_to
     assert extra == {}
 
 

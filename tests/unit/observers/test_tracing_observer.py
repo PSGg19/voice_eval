@@ -36,6 +36,13 @@ class FakeTracer:
     def record_span(self, name, *, parent, start_ns, end_ns, error=None, **attrs):
         self.calls.append(("span", name, parent, start_ns, end_ns, error, attrs))
 
+    def begin_span(self, name, *, parent, start_ns, **attrs):
+        self.calls.append(("gbegin", name, parent, start_ns, attrs))
+        return "GROUP"
+
+    def end_span(self, handle, *, end_ns, **attrs):
+        self.calls.append(("gend", handle, end_ns, attrs))
+
     def record_generation(self, name, *, parent, start_ns, end_ns, model,
                           error=None, **attrs):
         self.calls.append(("gen", name, parent, start_ns, end_ns, model, error, attrs))
@@ -66,22 +73,34 @@ def test_run_becomes_one_trace_with_turn_and_generation_children(traced):
     obs.on_event(RunFinished(status="completed", passed=True, at_ns=10_000_000))
 
     kinds = [c[0] for c in tracer.calls]
-    assert kinds == ["begin", "span", "span", "gen", "end"]
+    # OSV-style tree: `turn 1` group wraps bot + caller; the generation here
+    # arrives after the turn closed, so it stays on the root.
+    assert kinds == ["begin", "gbegin", "span", "span", "gend", "gen", "end"]
 
     begin = tracer.calls[0]
     assert begin[2] == 1000 and begin[3]["opkura.region"] == "in"
 
-    bot = tracer.calls[1]
+    group = tracer.calls[1]
+    assert group[1] == "turn 1" and group[2] == "ROOT"
+    assert group[3] == 3_000_000            # opens at the bot's own start
+
+    bot = tracer.calls[2]
     # start reconstructed from the bot's OWN latency: at - 2ms
     assert (bot[3], bot[4]) == (3_000_000, 5_000_000)
-    assert bot[2] == "ROOT" and bot[6]["opkura.module"] == "greeting"
+    assert bot[2] == "GROUP" and bot[6]["opkura.module"] == "greeting"
 
-    gen = tracer.calls[3]
+    caller = tracer.calls[3]
+    assert caller[1] == "caller" and caller[2] == "GROUP"
+
+    gend = tracer.calls[4]
+    assert gend[3]["output.value"] == "hi"  # the group closes with the reply
+
+    gen = tracer.calls[5]
     assert (gen[3], gen[4]) == (7_000_000, 9_000_000)  # exactly as measured
     assert gen[5] == "gemini-2.5-flash"
     assert gen[7]["llm.token_count.prompt"] == 10
 
-    end = tracer.calls[4]
+    end = tracer.calls[6]
     assert end[2] == 10_000_000 and end[4]["opkura.passed"] is True
     assert tracer.flushed == 1
 
@@ -133,7 +152,7 @@ def test_failed_run_is_always_kept_even_at_rate_zero():
     obs = TracingObserver(tracer, sample_rate=0.0)
     for e in _run_events(passed=False):
         obs.on_event(e)
-    assert [c[0] for c in tracer.calls] == ["begin", "span", "end"]
+    assert [c[0] for c in tracer.calls] == ["begin", "gbegin", "span", "gend", "end"]
 
 
 def test_rate_one_keeps_passed_runs():
@@ -141,7 +160,7 @@ def test_rate_one_keeps_passed_runs():
     obs = TracingObserver(tracer, sample_rate=1.0)
     for e in _run_events(passed=True):
         obs.on_event(e)
-    assert [c[0] for c in tracer.calls] == ["begin", "span", "end"]
+    assert [c[0] for c in tracer.calls] == ["begin", "gbegin", "span", "gend", "end"]
 
 
 def test_terminal_flush_is_exempt_from_slow_warning(caplog):
