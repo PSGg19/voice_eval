@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from opkura.core.config import Settings
+from vjudge.core.config import Settings
 
 
 REQUIRED = {
-    "AUTOCALLS_TWILIO_ACCOUNT_SID": "x",
-    "AUTOCALLS_TWILIO_AUTH_TOKEN": "x",
-    "AUTOCALLS_TWILIO_PHONE_NUMBER": "x",
-    "AUTOCALLS_DEEPGRAM_API_KEY": "x",
+    "VJUDGE_TWILIO_ACCOUNT_SID": "x",
+    "VJUDGE_TWILIO_AUTH_TOKEN": "x",
+    "VJUDGE_TWILIO_PHONE_NUMBER": "x",
+    "VJUDGE_DEEPGRAM_API_KEY": "x",
 }
 
 
@@ -19,12 +19,12 @@ def _set_required(monkeypatch):
         monkeypatch.setenv(k, v)
 
 
-def test_from_env_reads_autocalls_prefixed_env(monkeypatch):
+def test_from_env_reads_vjudge_prefixed_env(monkeypatch):
     _set_required(monkeypatch)
-    monkeypatch.setenv("AUTOCALLS_GEMINI_API_KEY", "secret-gemini")
-    monkeypatch.setenv("AUTOCALLS_CALLER_MODEL", "gemini-flash-test")
-    monkeypatch.setenv("AUTOCALLS_EVALUATOR_MODEL", "gemini-pro-test")
-    monkeypatch.setenv("AUTOCALLS_TEMPERATURE", "0.7")
+    monkeypatch.setenv("VJUDGE_GEMINI_API_KEY", "secret-gemini")
+    monkeypatch.setenv("VJUDGE_CALLER_MODEL", "gemini-flash-test")
+    monkeypatch.setenv("VJUDGE_EVALUATOR_MODEL", "gemini-pro-test")
+    monkeypatch.setenv("VJUDGE_TEMPERATURE", "0.7")
 
     s = Settings(_env_file=None)
 
@@ -36,7 +36,7 @@ def test_from_env_reads_autocalls_prefixed_env(monkeypatch):
 
 def test_defaults_apply_when_env_unset(monkeypatch):
     _set_required(monkeypatch)
-    for k in ("AUTOCALLS_CALLER_MODEL", "AUTOCALLS_EVALUATOR_MODEL", "AUTOCALLS_TEMPERATURE"):
+    for k in ("VJUDGE_CALLER_MODEL", "VJUDGE_EVALUATOR_MODEL", "VJUDGE_TEMPERATURE"):
         monkeypatch.delenv(k, raising=False)
 
     s = Settings(_env_file=None)
@@ -48,13 +48,13 @@ def test_defaults_apply_when_env_unset(monkeypatch):
 
 def test_temperature_coerces_from_string(monkeypatch):
     _set_required(monkeypatch)
-    monkeypatch.setenv("AUTOCALLS_TEMPERATURE", "0.9")
+    monkeypatch.setenv("VJUDGE_TEMPERATURE", "0.9")
     assert Settings(_env_file=None).temperature == pytest.approx(0.9)
 
 
 def test_invalid_temperature_raises(monkeypatch):
     _set_required(monkeypatch)
-    monkeypatch.setenv("AUTOCALLS_TEMPERATURE", "abc")
+    monkeypatch.setenv("VJUDGE_TEMPERATURE", "abc")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 

@@ -14,19 +14,19 @@ import json
 
 import pytest
 
-from opkura.core.models import Scenario
-from opkura.engine.caller import AICallerEngine
-from opkura.engine.conversation import ConversationEngine, Termination
-from opkura.frames import CallerHangup
-from opkura.llm.base import LLMResult
-from opkura.voice.audio_out import AudioOut
-from opkura.voice.engine_bridge import EngineBridge
-from opkura.voice.frames import InboundAudio
-from opkura.voice.processor import Chain
-from opkura.voice.serializers import TwilioSerializer
-from opkura.voice.stt_processor import STTProcessor
-from opkura.voice.turn_detect import TurnDetector
-from opkura.voice.tts_processor import TTSProcessor
+from vjudge.core.models import Scenario
+from vjudge.engine.caller import AICallerEngine
+from vjudge.engine.conversation import ConversationEngine, Termination
+from vjudge.frames import CallerHangup
+from vjudge.llm.base import LLMResult
+from vjudge.voice.audio_out import AudioOut
+from vjudge.voice.engine_bridge import EngineBridge
+from vjudge.voice.frames import InboundAudio
+from vjudge.voice.processor import Chain
+from vjudge.voice.serializers import TwilioSerializer
+from vjudge.voice.stt_processor import STTProcessor
+from vjudge.voice.turn_detect import TurnDetector
+from vjudge.voice.tts_processor import TTSProcessor
 
 
 def make_scenario() -> Scenario:
@@ -149,7 +149,7 @@ async def test_full_chain_conversation_end_to_end():
     # the hangup passed the terminal link for the wire owner to act on;
     # CallerSpeech is CONSUMED by the TTS link (SpeakEnded marks each one)
     assert any(isinstance(f, CallerHangup) for f in tap)
-    from opkura.voice.frames import SpeakEnded
+    from vjudge.voice.frames import SpeakEnded
 
     assert sum(isinstance(f, SpeakEnded) for f in tap) == 2
     # P6.5's shape: nothing orphaned.
@@ -166,7 +166,7 @@ class FakeTextBackend:
         self.interaction_uuid = "int-identity"
 
     def _next(self):
-        from opkura.transport.text import BotTurn
+        from vjudge.transport.text import BotTurn
 
         text = self._lines.pop(0) if self._lines else "(exhausted)"
         return BotTurn(text=text, message_type="RECORD")
@@ -185,7 +185,7 @@ class FakeTextBackend:
 async def test_text_adapter_and_voice_chain_produce_identical_conversations():
     """PRD acceptance: the same scenario through the text adapter and through
     the full voice chain yields identical transcripts and termination."""
-    from opkura.transport.text_adapter import TextFrameAdapter
+    from vjudge.transport.text_adapter import TextFrameAdapter
 
     scenario = make_scenario()
     bot_lines = [

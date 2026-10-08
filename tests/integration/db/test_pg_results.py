@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from opkura.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationResult,
@@ -22,8 +22,8 @@ from opkura.core.models import (
     LoadTestResult,
     Scenario,
 )
-from opkura.db.models import Run, RunBatch
-from opkura.db.results import PgResultStore
+from vjudge.db.models import Run, RunBatch
+from vjudge.db.results import PgResultStore
 
 
 @pytest.fixture()
@@ -74,7 +74,7 @@ def test_save_result_maps_onto_the_runs_table(store, migrated_engine):
     run_uuid = asyncio.run(
         store.save_result(result, scenario=make_scenario(), transport="sip")
     )
-    # run_uuid IS the opkura session id — one join key across DB, logs, SIP.
+    # run_uuid IS the vjudge session id — one join key across DB, logs, SIP.
     assert run_uuid == uuid.UUID(result.session_id)
 
     with Session(migrated_engine) as s:

@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from opkura.core.region import ALLOWED_REGIONS, apply_region, reset_announcements
+from vjudge.core.region import ALLOWED_REGIONS, apply_region, reset_announcements
 
 
 @pytest.fixture(autouse=True)
@@ -16,7 +16,7 @@ def _clean():
     reset_announcements()
 
 
-_US = "https://llm-studio.skit.ai/us/api/interface"
+_US = "https://llm-studio.vjudge.dev/us/api/interface"
 
 
 @pytest.mark.parametrize("region", ALLOWED_REGIONS)
@@ -46,7 +46,7 @@ def test_a_region_word_not_in_a_path_segment_is_not_matched():
 
 
 def test_a_url_with_no_region_segment_warns_and_is_unchanged(caplog):
-    with caplog.at_level(logging.WARNING, logger="opkura.core.region"):
+    with caplog.at_level(logging.WARNING, logger="vjudge.core.region"):
         out = apply_region("http://localhost:8001", "us")
     assert out == "http://localhost:8001"
     assert "no recognisable region path segment" in caplog.text
@@ -55,32 +55,32 @@ def test_a_url_with_no_region_segment_warns_and_is_unchanged(caplog):
 def test_the_substitution_is_announced_exactly_once(caplog):
     """`TextTransport.base_url` is a property called every turn and every retry.
     Logging per call printed the same line five times in a three-turn run."""
-    with caplog.at_level(logging.INFO, logger="opkura.core.region"):
+    with caplog.at_level(logging.INFO, logger="vjudge.core.region"):
         for _ in range(5):
-            apply_region("https://llm-studio.skit.ai/in/api/text", "us")
+            apply_region("https://llm-studio.vjudge.dev/in/api/text", "us")
     assert caplog.text.count("scenario pins region=us") == 1
 
 
 def test_a_different_decision_is_announced_separately(caplog):
     """Deduping must key on the decision, not silence everything after the first."""
-    with caplog.at_level(logging.INFO, logger="opkura.core.region"):
-        apply_region("https://llm-studio.skit.ai/in/api/text", "us", what="text")
-        apply_region("https://llm-studio.skit.ai/in/api/interface", "us", what="osv")
+    with caplog.at_level(logging.INFO, logger="vjudge.core.region"):
+        apply_region("https://llm-studio.vjudge.dev/in/api/text", "us", what="text")
+        apply_region("https://llm-studio.vjudge.dev/in/api/interface", "us", what="osv")
     assert caplog.text.count("scenario pins region=us") == 2
 
 
 def test_reset_re_announces(caplog):
     """A campaign runs many scenarios; each should report its own routing."""
-    with caplog.at_level(logging.INFO, logger="opkura.core.region"):
-        apply_region("https://llm-studio.skit.ai/in/api/text", "us")
+    with caplog.at_level(logging.INFO, logger="vjudge.core.region"):
+        apply_region("https://llm-studio.vjudge.dev/in/api/text", "us")
         reset_announcements()
-        apply_region("https://llm-studio.skit.ai/in/api/text", "us")
+        apply_region("https://llm-studio.vjudge.dev/in/api/text", "us")
     assert caplog.text.count("scenario pins region=us") == 2
 
 
 def test_a_noop_substitution_is_not_announced(caplog):
     """Pinning the region you were already using is not news."""
-    with caplog.at_level(logging.INFO, logger="opkura.core.region"):
+    with caplog.at_level(logging.INFO, logger="vjudge.core.region"):
         assert apply_region(_US, "us") == _US
     assert "scenario pins region" not in caplog.text
 
@@ -88,6 +88,6 @@ def test_a_noop_substitution_is_not_announced(caplog):
 def test_the_loader_and_the_rewriter_agree_on_the_region_list():
     """A region the loader accepts but the rewriter ignores would silently leave
     the URL pointing at the wrong gateway."""
-    from opkura.core.scenario_loader import ALLOWED_REGIONS as loader_regions
+    from vjudge.core.scenario_loader import ALLOWED_REGIONS as loader_regions
 
     assert loader_regions is ALLOWED_REGIONS

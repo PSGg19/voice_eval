@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from opkura.llm.gemini import GeminiClient
+from vjudge.llm.gemini import GeminiClient
 
 
 def _fake_response(text):
@@ -15,7 +15,7 @@ def _fake_response(text):
 
 @pytest.fixture
 def mock_genai_cls():
-    with patch("opkura.llm.gemini.genai.Client") as mock_cls:
+    with patch("vjudge.llm.gemini.genai.Client") as mock_cls:
         instance = MagicMock()
         instance.aio.models.generate_content = AsyncMock()
         mock_cls.return_value = instance

@@ -14,18 +14,18 @@ import time
 
 import pytest
 
-from opkura.core.models import Scenario
-from opkura.engine.caller import AICallerEngine
-from opkura.engine.conversation import ConversationEngine
-from opkura.llm.base import LLMResult
-from opkura.voice.audio_out import AudioOut
-from opkura.voice.engine_bridge import EngineBridge
-from opkura.voice.frames import InboundAudio
-from opkura.voice.processor import Chain
-from opkura.voice.serializers import TwilioSerializer
-from opkura.voice.stt_processor import STTProcessor
-from opkura.voice.turn_detect import TurnDetector
-from opkura.voice.tts_processor import TTSProcessor
+from vjudge.core.models import Scenario
+from vjudge.engine.caller import AICallerEngine
+from vjudge.engine.conversation import ConversationEngine
+from vjudge.llm.base import LLMResult
+from vjudge.voice.audio_out import AudioOut
+from vjudge.voice.engine_bridge import EngineBridge
+from vjudge.voice.frames import InboundAudio
+from vjudge.voice.processor import Chain
+from vjudge.voice.serializers import TwilioSerializer
+from vjudge.voice.stt_processor import STTProcessor
+from vjudge.voice.turn_detect import TurnDetector
+from vjudge.voice.tts_processor import TTSProcessor
 
 
 def fd_count() -> int:

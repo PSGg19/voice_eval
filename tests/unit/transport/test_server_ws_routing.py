@@ -1,5 +1,5 @@
 """Tests for Phase 3 Task 3 — the WS endpoint's reconnect-routing logic
-in `opkura.transport.server.media_stream_ws`.
+in `vjudge.transport.server.media_stream_ws`.
 
 The endpoint has three branches:
   (a) session._in_transition is True   → call session.reattach(ws)
@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from opkura.transport import server as srv_mod
+from vjudge.transport import server as srv_mod
 
 
 @pytest.fixture(autouse=True)
@@ -200,7 +200,7 @@ async def test_completion_event_withheld_mid_transition():
     """When attach_ws returns DURING a DTMF transition, completion
     MUST NOT fire — the runner would hang up the call mid-DTMF.
 
-    This is the post-Task-5 fix: opkura saw `attach_ws returning in
+    This is the post-Task-5 fix: vjudge saw `attach_ws returning in
     transition` immediately followed by a Twilio hangup API call
     during the live J-001 retest, killing the call while
     `<Play digits>` was still playing the 16 DTMF tones.

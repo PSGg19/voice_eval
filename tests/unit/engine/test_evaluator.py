@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from opkura.engine.evaluator import Evaluator
-from opkura.core.models import TranscriptEntry
+from vjudge.engine.evaluator import Evaluator
+from vjudge.core.models import TranscriptEntry
 
 
 def _mk_evaluator(*responses, temperature: float = 0.3) -> tuple[Evaluator, AsyncMock]:
@@ -298,7 +298,7 @@ async def test_attached_logwriter_records_evaluator_llm_call():
         def record_bot_response_latency(self, ms):
             pass
 
-    from opkura.llm.base import LLMResult
+    from vjudge.llm.base import LLMResult
 
     # Usage rides in the LLMResult (P1.2), not on the client.
     ev, llm = _mk_evaluator(

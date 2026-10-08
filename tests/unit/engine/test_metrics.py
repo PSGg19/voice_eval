@@ -6,8 +6,8 @@ import logging
 
 import pytest
 
-from opkura.core.models import TranscriptEntry
-from opkura.engine.metrics import (
+from vjudge.core.models import TranscriptEntry
+from vjudge.engine.metrics import (
     COMPUTED_KEYS,
     compute_metrics,
     find_duplicated_text,
@@ -150,7 +150,7 @@ def test_measured_values_win_over_reported_ones():
 
 
 def test_a_disagreement_is_logged_loudly(caplog):
-    with caplog.at_level(logging.WARNING, logger="opkura.engine.metrics"):
+    with caplog.at_level(logging.WARNING, logger="vjudge.engine.metrics"):
         merge_metrics({"bot_turns": 12}, {"bot_turns": 2})
     assert "metric disagreement" in caplog.text
     assert "LLM said 12, measured 2" in caplog.text
@@ -185,8 +185,8 @@ def test_every_computed_key_is_declared():
 
 # --------------------------------------------------------- declared metric specs
 
-from opkura.core.models import MetricSpec  # noqa: E402
-from opkura.engine.metrics import (  # noqa: E402
+from vjudge.core.models import MetricSpec  # noqa: E402
+from vjudge.engine.metrics import (  # noqa: E402
     metrics_to_request,
     render_metric_spec,
     validate_metrics,

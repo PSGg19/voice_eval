@@ -5,8 +5,8 @@ import asyncio
 import logging
 import time
 
-from opkura.observers.dispatcher import Dispatcher, emit, run_dispatcher
-from opkura.observers.events import RunStarted
+from vjudge.observers.dispatcher import Dispatcher, emit, run_dispatcher
+from vjudge.observers.events import RunStarted
 
 
 def make_event(name: str = "s") -> RunStarted:

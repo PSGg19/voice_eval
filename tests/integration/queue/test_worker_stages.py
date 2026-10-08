@@ -15,16 +15,16 @@ from fakeredis import aioredis as fakeaioredis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from opkura.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationResult,
     TranscriptEntry,
 )
-from opkura.db.models import Run, Scenario as ScenarioRow
-from opkura.queue.leases import LeaseManager
-from opkura.queue.streams import StageQueue
-from opkura.queue.worker import StageWorker, sampled_in
+from vjudge.db.models import Run, Scenario as ScenarioRow
+from vjudge.queue.leases import LeaseManager
+from vjudge.queue.streams import StageQueue
+from vjudge.queue.worker import StageWorker, sampled_in
 
 
 SCENARIO_BODY = {
@@ -233,7 +233,7 @@ async def test_budget_exhausted_defers_without_burning_an_attempt(
 ):
     """P4.4: no slot → the entry is re-queued with the SAME attempt after the
     lease is released, and the row is untouched."""
-    from opkura.queue.admission import CONFIG_HASH, ExecutionBudget
+    from vjudge.queue.admission import CONFIG_HASH, ExecutionBudget
 
     run_uuid = seed_run(migrated_engine)
     created = get_run(migrated_engine, run_uuid).created_at

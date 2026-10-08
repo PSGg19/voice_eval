@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from opkura.core.rendering import (
+from vjudge.core.rendering import (
     MAX_TEMPLATE_BYTES,
     RenderError,
     render_sandboxed,

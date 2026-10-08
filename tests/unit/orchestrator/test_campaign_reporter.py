@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from opkura.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     CampaignResult,
     EvaluationCriterion,
     EvaluationResult,
 )
-from opkura.orchestrator.campaign_reporter import (
+from vjudge.orchestrator.campaign_reporter import (
     campaign_log_dir,
     render_json,
     render_markdown,

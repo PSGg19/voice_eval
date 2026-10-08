@@ -1,4 +1,4 @@
-# Opkura: one engine, two transports
+# VJudge: one engine, two transports
 
 Implementation spec for running the same scenario over **text** (OSV's text
 runtime, HTTP) or **voice** (Twilio, existing). Rationale and coverage analysis
@@ -31,13 +31,13 @@ while True:
     response = await pipeline_manager.process_message(user_input)
 ```
 
-`process_message(text) -> text` is the turn-level API opkura needs. That is the
+`process_message(text) -> text` is the turn-level API vjudge needs. That is the
 whole transport, and it's already proven in-tree.
 
 ## The seam
 
 ```python
-# opkura/transport/base.py
+# vjudge/transport/base.py
 class Transport(Protocol):
     async def start(self)  -> BotTurn: ...                  # open the conversation, return greeting
     async def send(self, turn: CallerTurn) -> BotTurn: ...  # caller speech/dtmf → bot reply
@@ -81,7 +81,7 @@ transport ever calls.
 
 ## Text transport
 
-`opkura/transport/text.py`, ~150 lines. HTTP against
+`vjudge/transport/text.py`, ~150 lines. HTTP against
 `POST /text_runtime/post_message_web`.
 
 ### Request mapping
@@ -90,8 +90,8 @@ transport ever calls.
 |---|---|
 | `assistant_uuid` | from the scenario payload |
 | `channel` | **`"VOICE"`** — non-negotiable, see below |
-| `is_test` | `false` by default — scenario `is_test:` wins, else `AUTOCALLS_TEXT_IS_TEST`. `true` hides the run from llm-studio and suppresses only the compliance event, so it is off by default |
-| `recipient_id` | `OPKURA_{scenario}_{run_uuid[:8]}` — mirrors imposter's `IMPOSTER_{test_id}_RUN_{run_id}` |
+| `is_test` | `false` by default — scenario `is_test:` wins, else `VJUDGE_TEXT_IS_TEST`. `true` hides the run from llm-studio and suppresses only the compliance event, so it is off by default |
+| `recipient_id` | `VJUDGE_{scenario}_{run_uuid[:8]}` — mirrors imposter's `IMPOSTER_{test_id}_RUN_{run_id}` |
 | `user_message` | `turn.speech`, or `turn.dtmf` when the bot asked for digits |
 | `interaction_metadata` | the scenario's `vars` |
 | `fc_version` | pin the assistant version |
@@ -112,7 +112,7 @@ transport ever calls.
 to use `POST /text_runtime/update_interaction_conversation_status/`; that is
 wrong. Its request requires `vendor_call_id` and carries `status_long_code` /
 `total_message_segments` / `created_reply_uuid` — it is the SMS/email
-**delivery-status** hook, and opkura has no `vendor_call_id`. (Checked against
+**delivery-status** hook, and vjudge has no `vendor_call_id`. (Checked against
 `llm-studio-frontend`'s generated schema, `UpdateInteractionConversationStatusRequest`.)
 
 Consequence: every text run leaves its interaction at `status=ongoing`, showing
@@ -158,7 +158,7 @@ exists either. See "No OSV changes required" below.
 
 ## Voice transport
 
-`opkura/transport/voice.py` — a thin adapter over the existing
+`vjudge/transport/voice.py` — a thin adapter over the existing
 `MediaStreamSession`. `send()` = `_speak()` + `_wait_for_bot_turn()`. Barge stays
 inside, driven by the engine's hook.
 
@@ -205,15 +205,15 @@ yono_general`. Module-path assertions are the thing text mode gives you that
 voice cannot.
 
 **One OSV change unlocks the rest**: populate `phone_number` from the caller
-identity on the text runtime, as voice does. Nothing on the opkura side can
+identity on the text runtime, as voice does. Nothing on the vjudge side can
 substitute for it.
 
 **Region is a path segment**, and the assistant resolves from `virtual_id` — no
 `assistant_uuid` needed:
 
 ```
-US     https://llm-studio.skit.ai/us/api/text
-India  https://llm-studio.skit.ai/in/api/text   <-- verified working
+US     https://llm-studio.vjudge.dev/us/api/text
+India  https://llm-studio.vjudge.dev/in/api/text   <-- verified working
 ```
 
 Sending an India number to the US gateway returns a clean
@@ -280,7 +280,7 @@ assert:
 > It is a V1 **legacy key that `lint.py` rejects outright**, so a scenario using
 > it fails before it runs. Corrected 2026-08-25.
 
-This matters beyond convenience. Opkura's verdict otherwise comes entirely from
+This matters beyond convenience. VJudge's verdict otherwise comes entirely from
 an unvalidated LLM judge. Assertions take the structural half of that judgement
 away from the model — the I483617082 failure (pre-flight skipped, wrong tool
 called after an error) is caught by `tool_order` with no LLM involved.
@@ -308,9 +308,9 @@ account lookup and came back with `tool_calls: []`. Separately, OSV strips
 marker tags server-side *before* filling `output_message`, so a completion of
 nothing but `<LANG:en-US>` arrives as `""` — **indistinguishable from the bot
 saying nothing at all**. That is precisely the IB 2.0 stall, and it is why
-diagnosing it needed a Metabase query rather than an opkura log line.
+diagnosing it needed a Metabase query rather than an vjudge log line.
 
-Both survive in `GET /client/{c}/interactions/conversations/{i}/`, so opkura now
+Both survive in `GET /client/{c}/interactions/conversations/{i}/`, so vjudge now
 fetches it once after every text run
 (`TestRunner._enrich_text_result_from_osv`) and fills:
 
@@ -330,14 +330,14 @@ Properties worth keeping if you touch this:
 * **Shape tolerance is deliberate**, not sloppiness. No one has ever pinned this
   payload's shape (`jobs/pipeline` hands it to an LLM verbatim), so the envelope
   key, role key and message key are each accepted in several spellings.
-* **Token**: `AUTOCALLS_OSV_ACCESS_TOKEN`, falling back to
-  `AUTOCALLS_TEXT_RUNTIME_TOKEN` **only when both base URLs are the same host**.
+* **Token**: `VJUDGE_OSV_ACCESS_TOKEN`, falling back to
+  `VJUDGE_TEXT_RUNTIME_TOKEN` **only when both base URLs are the same host**.
   In practice both are one llm-studio JWT from the same browser session, so
   without the fallback the feature ships switched off; but the text runtime
   defaults to `localhost:8001` and a local token must not be sent to
   llm-studio.
 
-The tag-only line is the one to look for. It is the difference between "opkura
+The tag-only line is the one to look for. It is the difference between "vjudge
 is broken" and "the bot is broken" — and on voice the same reply is dead air
 the caller talks over, so it is a defect on both transports.
 Leave the evaluator to the genuinely subjective parts: tone, compliance wording,
@@ -352,7 +352,7 @@ Tested against the running text runtime (`orchestrator-service`, port 8001) on
 
 ```
 POST /text_runtime/post_message_web
-{ "assistant_uuid": "08432036-…", "recipient_id": "OPKURA_probe_voice_…",
+{ "assistant_uuid": "08432036-…", "recipient_id": "VJUDGE_probe_voice_…",
   "user_message": "", "channel": "VOICE", "is_test": true, "virtual_id": "100" }
 ```
 
@@ -376,7 +376,7 @@ the orchestrator.
 ### The DTMF signal isn't needed either
 
 An earlier draft asked for `message_type: "DTMF"` + `max_digits` in the response.
-**Retracted** — opkura's caller already decides DTMF from the bot's words. From
+**Retracted** — vjudge's caller already decides DTMF from the bot's words. From
 `clients/resurgent/scenarios/pif/C-002-debit-card-happy-path.yaml`:
 
 ```
@@ -387,9 +387,9 @@ An earlier draft asked for `message_type: "DTMF"` + `max_digits` in the response
       (If bot asks via voice instead of DTMF, respond "yes".)
 ```
 
-Over voice there is no structured DTMF signal available to opkura either — the
+Over voice there is no structured DTMF signal available to vjudge either — the
 caller LLM reads the bot's speech and decides. That works identically in text
-mode, and better, since opkura reads the text directly rather than through STT.
+mode, and better, since vjudge reads the text directly rather than through STT.
 `current_module` (e.g. `CARD_PAYMENT`) is a second signal already present.
 
 ### The bar for changing the orchestrator
@@ -399,7 +399,7 @@ An OSV change is justified only when **all three** hold:
 1. The data is genuinely unavailable through any existing interface — not merely
    less convenient.
 2. It is load-bearing: the capability fails without it, rather than getting nicer.
-3. No workaround exists on opkura's side.
+3. No workaround exists on vjudge's side.
 
 Applied to everything previously proposed:
 
@@ -407,12 +407,12 @@ Applied to everything previously proposed:
 |---|---|
 | `channel=VOICE` support | **not needed** — works today |
 | `message_type="DTMF"` + `max_digits` | fails all three — caller LLM infers from prose |
-| Missing flow → 4xx instead of 200 | fails #2/#3 — opkura validates the body. Report as a bug, don't block |
+| Missing flow → 4xx instead of 200 | fails #2/#3 — vjudge validates the body. Report as a bug, don't block |
 | `interaction_uuid` injection / SIP header | not needed for text; PSTN-only, and reconciliation is a workaround |
-| Provider capability fields | fails #3 — opkura holds its own |
+| Provider capability fields | fails #3 — vjudge holds its own |
 | `is_test` for voice calls | only one that passes #1/#3, and only once PSTN volume matters. Caller-ID whitelist is config, not code |
 
-**Net: the text transport is entirely opkura-side work.**
+**Net: the text transport is entirely vjudge-side work.**
 
 ## Four gotchas the live test surfaced
 
@@ -428,7 +428,7 @@ Not blockers, but the text transport must handle all four.
 2. **Reusing a `recipient_id` continues the previous conversation.** Two probes
    sharing one got the same `interaction_uuid` back, with the bot repeating its
    greeting. A **unique `recipient_id` per run is mandatory** —
-   `OPKURA_{scenario}_{run_uuid[:8]}`.
+   `VJUDGE_{scenario}_{run_uuid[:8]}`.
 3. **Integrations really fire.** The second probe's
    `error_messages.integration_error` showed an HTTP 404 against a dead ngrok
    tunnel. Live confirmation that text mode executes the real tools through PIS —
@@ -492,7 +492,7 @@ Not blockers, but the text transport must handle all four.
    failure, which is what it is.
 
 Bonus find: `interaction_metadata` already carries `grafana_url`, `sentry_url`
-and `llm_studio_url`. The `debugging_urls` block proposed for opkura's run record
+and `llm_studio_url`. The `debugging_urls` block proposed for vjudge's run record
 already exists — carry it through rather than rebuilding it.
 
 Also seen on every turn, both pods: `--- Logging error in Loguru Handler #1 ---`
@@ -514,8 +514,8 @@ voice runs the same deterministic assertions text has.
 
 ## In-process vs HTTP
 
-The CLI uses `TextPipelineManager` in-process. Opkura should use **HTTP**:
-in-process would mean opkura running inside OSV's codebase and venv, giving up
+The CLI uses `TextPipelineManager` in-process. VJudge should use **HTTP**:
+in-process would mean vjudge running inside OSV's codebase and venv, giving up
 the independence that justifies a separate harness, and losing `is_test` /
 `interaction_uuid` / `current_module` as a clean contract.
 

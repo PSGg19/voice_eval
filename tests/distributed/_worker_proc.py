@@ -31,7 +31,7 @@ class ProbeRunner:
         self.sleep_s = sleep_s
 
     async def run_scenario(self, scenario):
-        from opkura.core.models import CallResult, CallStatus, TranscriptEntry
+        from vjudge.core.models import CallResult, CallStatus, TranscriptEntry
 
         target = scenario.target
         name = scenario.name
@@ -52,7 +52,7 @@ class ProbeRunner:
         result.assertion_outcomes = []
 
     async def _run_evaluator(self, scenario, result):
-        from opkura.core.models import EvaluationResult
+        from vjudge.core.models import EvaluationResult
 
         return EvaluationResult(overall_passed=True, overall_reasoning="probe")
 
@@ -76,9 +76,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    from opkura.cli.worker_cmd import worker_main
-    from opkura.core.config import Settings
-    from opkura.queue.streams import connect
+    from vjudge.cli.worker_cmd import worker_main
+    from vjudge.core.config import Settings
+    from vjudge.queue.streams import connect
 
     settings = Settings(
         _env_file=None,

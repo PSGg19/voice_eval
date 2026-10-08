@@ -18,23 +18,23 @@ What it does:
    — stale shebangs from a moved repo, etc).
 3. Installs **pinned** dependencies from `requirements.txt` for
    byte-identical environments across the team (equivalent to `npm ci`).
-4. Installs `opkura` in editable mode so the `opkura` console-script
+4. Installs `vjudge` in editable mode so the `vjudge` console-script
    wires up (equivalent to `npm link`).
 5. Copies `.env.example` → `.env` if `.env` doesn't exist (does NOT
    overwrite an existing one).
-6. Verifies `opkura --help` works.
+6. Verifies `vjudge --help` works.
 7. Prints next-step guidance.
 
-After running setup, you have two ways to invoke `opkura`:
+After running setup, you have two ways to invoke `vjudge`:
 
 ```bash
-# Option A: activate the venv (then plain `opkura` works for the session)
+# Option A: activate the venv (then plain `vjudge` works for the session)
 source .venv/bin/activate
-opkura --help
+vjudge --help
 # (`deactivate` to leave)
 
 # Option B: use the venv binary directly (no activation needed)
-.venv/bin/opkura --help
+.venv/bin/vjudge --help
 ```
 
 ## `test.sh` — run tests at any granularity
@@ -80,7 +80,7 @@ live tests still skip safely.
 # 2. Regenerate requirements.txt
 .venv/bin/python -m pip freeze \
     | grep -v "^-e " \
-    | grep -v "^opkura" \
+    | grep -v "^vjudge" \
     > requirements.txt
 
 # 3. Commit the change
@@ -88,5 +88,5 @@ git add requirements.txt
 git commit -m "deps: bump <package> to <version>"
 ```
 
-The `grep -v` filters drop opkura itself (installed editable, not a
+The `grep -v` filters drop vjudge itself (installed editable, not a
 distributable package) so requirements.txt stays clean.

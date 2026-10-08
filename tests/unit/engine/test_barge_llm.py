@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from opkura.engine.caller import AICallerEngine
-from opkura.core.models import (
+from vjudge.engine.caller import AICallerEngine
+from vjudge.core.models import (
     BargeInConfig,
     CallResult,
     CallStatus,
     LLMConfig,
     Scenario,
 )
-from opkura.core.scenario_loader import load
+from vjudge.core.scenario_loader import load
 
 
 def _llm_scenario(decide_every_ms: int = 50) -> Scenario:
@@ -186,7 +186,7 @@ def test_llm_mode_stores_bot_context_path_field(tmp_path):
     # Defense-in-depth: also verify Task 6's _apply_bcd ran. test_bcg.py owns
     # the primary coverage; this catches a future refactor that moves the BCD
     # apply step out of load() and leaves only the parse step here.
-    from opkura.core.scenario_loader import BCD_DELIMITER
+    from vjudge.core.scenario_loader import BCD_DELIMITER
 
     assert BCD_DELIMITER in sc.persona_rendered
 

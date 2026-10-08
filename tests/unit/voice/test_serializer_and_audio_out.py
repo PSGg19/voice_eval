@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from opkura.voice.audio_out import AudioOut
-from opkura.voice.frames import CallEnded, CallStarted, InboundAudio, OutboundAudio
-from opkura.voice.serializers import CHUNK_SIZE, MULAW_SILENCE, TwilioSerializer
+from vjudge.voice.audio_out import AudioOut
+from vjudge.voice.frames import CallEnded, CallStarted, InboundAudio, OutboundAudio
+from vjudge.voice.serializers import CHUNK_SIZE, MULAW_SILENCE, TwilioSerializer
 
 from tests.unit.voice.test_processor import run_processor
 

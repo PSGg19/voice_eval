@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time (and safely re-runnable) local setup for the full opkura stack:
+# One-time (and safely re-runnable) local setup for the full vjudge stack:
 #   python venv → deps → Postgres DB + migrations → Redis → observability
 #   containers → Grafana datasource → the web console.
 #
@@ -7,7 +7,7 @@
 #
 # Secrets are NOT created here. Two files hold them, both git-ignored:
 #   .env               — Twilio/Deepgram/Gemini/OSV keys, SIP trunk, PUBLIC_URL
-#   ~/.opkura-obs.env  — observability env (LOG_SINK, PHOENIX/LANGFUSE keys)
+#   ~/.vjudge-obs.env  — observability env (LOG_SINK, PHOENIX/LANGFUSE keys)
 # The script checks they exist and names what's missing, then stops.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,39 +21,39 @@ say "toolchain"
 command -v python3.12 >/dev/null || command -v python3.11 >/dev/null \
   || fail "python 3.11 or 3.12 (pyproject wants >=3.11,<3.13)"
 command -v docker >/dev/null      || fail "docker (Docker Desktop)"
-command -v node >/dev/null        || fail "node (for opkura-web)"
+command -v node >/dev/null        || fail "node (for vjudge-web)"
 command -v cloudflared >/dev/null || fail "cloudflared (brew install cloudflared)"
 command -v brew >/dev/null        || fail "homebrew"
 ok "python, docker, node, cloudflared"
 
 # ------------------------------------------------------------------ secrets
 say "secret files"
-[ -f .env ] || fail ".env — copy from a teammate; needs AUTOCALLS_TWILIO_*, \
-AUTOCALLS_DEEPGRAM_API_KEY, AUTOCALLS_GEMINI_API_KEY, AUTOCALLS_OSV_ACCESS_TOKEN, \
-AUTOCALLS_CALL_TRANSPORT=sip + SIP trunk vars, AUTOCALLS_QUEUE_ENABLED=true"
-for key in AUTOCALLS_TWILIO_ACCOUNT_SID AUTOCALLS_DEEPGRAM_API_KEY \
-           AUTOCALLS_GEMINI_API_KEY AUTOCALLS_OSV_ACCESS_TOKEN; do
+[ -f .env ] || fail ".env — copy from a teammate; needs VJUDGE_TWILIO_*, \
+VJUDGE_DEEPGRAM_API_KEY, VJUDGE_GEMINI_API_KEY, VJUDGE_OSV_ACCESS_TOKEN, \
+VJUDGE_CALL_TRANSPORT=sip + SIP trunk vars, VJUDGE_QUEUE_ENABLED=true"
+for key in VJUDGE_TWILIO_ACCOUNT_SID VJUDGE_DEEPGRAM_API_KEY \
+           VJUDGE_GEMINI_API_KEY VJUDGE_OSV_ACCESS_TOKEN; do
   grep -q "^${key}=" .env || fail ".env is missing ${key}"
 done
 ok ".env present with the core keys"
-if [ ! -f "$HOME/.opkura-obs.env" ]; then
-  cat > "$HOME/.opkura-obs.env" <<'EOF'
-# Observability env for opkura serve/worker — sourced by scripts/start.sh.
+if [ ! -f "$HOME/.vjudge-obs.env" ]; then
+  cat > "$HOME/.vjudge-obs.env" <<'EOF'
+# Observability env for vjudge serve/worker — sourced by scripts/start.sh.
 export LOG_SINK=loki
 export LOKI_URL=http://localhost:3100/loki/api/v1/push
 export PHOENIX_ENABLED=1
 # Langfuse: create a project at http://localhost:3200, then fill these in
-# (and NEXT_PUBLIC_LANGFUSE_PROJECT_ID in ../opkura-web/.env.local):
+# (and NEXT_PUBLIC_LANGFUSE_PROJECT_ID in ../vjudge-web/.env.local):
 #export LANGFUSE_ENABLED=1
 #export LANGFUSE_HOST=http://localhost:3200
 #export LANGFUSE_PUBLIC_KEY=pk-lf-...
 #export LANGFUSE_SECRET_KEY=sk-lf-...
 export TRACE_CAPTURE_LLM_IO=1
 EOF
-  chmod 600 "$HOME/.opkura-obs.env"
-  ok "wrote ~/.opkura-obs.env template (Langfuse keys commented out)"
+  chmod 600 "$HOME/.vjudge-obs.env"
+  ok "wrote ~/.vjudge-obs.env template (Langfuse keys commented out)"
 else
-  ok "~/.opkura-obs.env present"
+  ok "~/.vjudge-obs.env present"
 fi
 
 # --------------------------------------------------------------- python env
@@ -73,13 +73,13 @@ brew services list | grep -q "postgresql@14.*started" \
 brew services list | grep -q "^redis.*started" \
   || { brew services start redis; sleep 2; }
 ok "brew services up"
-# the DB (default url: postgresql+psycopg://postgres:root@localhost:5432/opkura)
-DB_URL=$(grep -oE '^AUTOCALLS_DATABASE_URL=.*' .env | cut -d= -f2- || true)
-psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='opkura'" 2>/dev/null | grep -q 1 \
-  || createdb -h localhost -U postgres opkura 2>/dev/null \
-  || psql -h localhost -tc "SELECT 1 FROM pg_database WHERE datname='opkura'" | grep -q 1 \
-  || createdb opkura
-ok "database 'opkura' exists"
+# the DB (default url: postgresql+psycopg://postgres:root@localhost:5432/vjudge)
+DB_URL=$(grep -oE '^VJUDGE_DATABASE_URL=.*' .env | cut -d= -f2- || true)
+psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='vjudge'" 2>/dev/null | grep -q 1 \
+  || createdb -h localhost -U postgres vjudge 2>/dev/null \
+  || psql -h localhost -tc "SELECT 1 FROM pg_database WHERE datname='vjudge'" | grep -q 1 \
+  || createdb vjudge
+ok "database 'vjudge' exists"
 
 say "migrations (alembic upgrade head)"
 .venv/bin/alembic upgrade head
@@ -104,12 +104,12 @@ else
 fi
 
 # ---------------------------------------------------------------- the web
-say "opkura-web (../opkura-web)"
-if [ -d ../opkura-web ]; then
-  (cd ../opkura-web && npm install --silent && npm run build 2>&1 | tail -1)
+say "vjudge-web (../vjudge-web)"
+if [ -d ../vjudge-web ]; then
+  (cd ../vjudge-web && npm install --silent && npm run build 2>&1 | tail -1)
   ok "built (serves on :3400)"
 else
-  echo "   ../opkura-web not found — clone it next to this repo"
+  echo "   ../vjudge-web not found — clone it next to this repo"
 fi
 
 # Give the containers a moment — langfuse/loki booting mid-suite shows up as
@@ -135,7 +135,7 @@ else
   echo "   Common causes on a first run:"
   echo "   - containers still warming: just re-run ./scripts/setup.sh"
   echo "   - ambient env leaking into tests: check"
-  echo "       env | grep -E '^(PG|AUTOCALLS|TRACING_|LOG_SINK|LANGFUSE_|PHOENIX_|OTEL_)'"
+  echo "       env | grep -E '^(PG|VJUDGE|TRACING_|LOG_SINK|LANGFUSE_|PHOENIX_|OTEL_)'"
   echo "     and retry from a shell without those exports"
 fi
 

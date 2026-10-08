@@ -10,15 +10,15 @@ import asyncio
 
 import pytest
 
-from opkura.core.models import Scenario
-from opkura.engine.caller import AICallerEngine, MAX_EMPTY_BOT_TURNS
-from opkura.engine.conversation import (
+from vjudge.core.models import Scenario
+from vjudge.engine.caller import AICallerEngine, MAX_EMPTY_BOT_TURNS
+from vjudge.engine.conversation import (
     EMPTY_TURN_NUDGE,
     EMPTY_TURN_NUDGE_LIMIT,
     ConversationEngine,
     Termination,
 )
-from opkura.frames import (
+from vjudge.frames import (
     BotFinalSpeech,
     BotTurnEnded,
     CallerDTMF,
@@ -30,7 +30,7 @@ from opkura.frames import (
     ModuleEntered,
     ToolCalled,
 )
-from opkura.llm.base import LLMResult
+from vjudge.llm.base import LLMResult
 
 
 def make_scenario(max_turns: int = 10) -> Scenario:
@@ -290,8 +290,8 @@ def test_engine_has_no_transport_imports():
     import sys
 
     code = (
-        "import sys; import opkura.engine.conversation; "
-        "transports = [m for m in sys.modules if m.startswith('opkura.transport')]; "
+        "import sys; import vjudge.engine.conversation; "
+        "transports = [m for m in sys.modules if m.startswith('vjudge.transport')]; "
         "third = [m for m in sys.modules if m.split('.')[0] in "
         "('twilio', 'httpx', 'fastapi', 'websockets', 'deepgram', 'uvicorn', 'audioop')]; "
         "assert not transports, f'engine imports transports: {transports}'; "

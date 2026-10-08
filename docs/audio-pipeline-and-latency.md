@@ -1,6 +1,6 @@
 # Audio Pipeline & Latency
 
-How audio flows through opkura end-to-end, where time goes, and why the
+How audio flows through vjudge end-to-end, where time goes, and why the
 current Deepgram-based endpointing fails for long bot turns with internal
 pauses.
 
@@ -10,7 +10,7 @@ pauses.
 
 ```
 ┌──────────┐   WebSocket A   ┌──────────┐   WebSocket B   ┌──────────┐
-│ Twilio   │ ◄──────────────►│  Opkura  │ ◄──────────────►│ Deepgram │
+│ Twilio   │ ◄──────────────►│  VJudge  │ ◄──────────────►│ Deepgram │
 │ (audio)  │ mulaw 8kHz      │ (FastAPI │ mulaw bytes /   │  (STT)   │
 │          │ 20ms chunks     │  server) │ STT events      │          │
 └──────────┘                 └──────────┘                 └──────────┘
@@ -31,26 +31,26 @@ pauses.
 ```
 
 WebSocket A and WebSocket B are **independent connections** with separate
-latency budgets. Opkura is the bridge.
+latency budgets. VJudge is the bridge.
 
 ### File map
 
 | Component | File | Key entry point |
 |---|---|---|
-| Twilio dial-out | `opkura/transport/call.py` | `CallManager.make_call` |
-| FastAPI server + webhooks | `opkura/transport/server.py` | `/twiml/{session_id}`, `/ws/{session_id}` |
-| WebSocket A handler | `opkura/transport/stream.py` | `MediaStreamSession.handle()` |
-| WebSocket B (STT) | `opkura/transport/stt.py` | `DeepgramSTT.start()` |
-| TTS (HTTP) | `opkura/transport/tts.py` | `DeepgramTTS.synthesize()` |
-| Caller LLM (HTTP) | `opkura/llm/gemini.py` | `GeminiClient.complete_json()` |
-| Turn-taking orchestration | `opkura/engine/caller.py` | `AICallerEngine.end_bot_turn()` |
-| Call lifecycle | `opkura/orchestrator/runner.py` | `TestRunner._run_v2_scenario()` |
+| Twilio dial-out | `vjudge/transport/call.py` | `CallManager.make_call` |
+| FastAPI server + webhooks | `vjudge/transport/server.py` | `/twiml/{session_id}`, `/ws/{session_id}` |
+| WebSocket A handler | `vjudge/transport/stream.py` | `MediaStreamSession.handle()` |
+| WebSocket B (STT) | `vjudge/transport/stt.py` | `DeepgramSTT.start()` |
+| TTS (HTTP) | `vjudge/transport/tts.py` | `DeepgramTTS.synthesize()` |
+| Caller LLM (HTTP) | `vjudge/llm/gemini.py` | `GeminiClient.complete_json()` |
+| Turn-taking orchestration | `vjudge/engine/caller.py` | `AICallerEngine.end_bot_turn()` |
+| Call lifecycle | `vjudge/orchestrator/runner.py` | `TestRunner._run_v2_scenario()` |
 
 ---
 
 ## End-to-end flow per turn
 
-### 1. Inbound audio (bot → opkura → Deepgram STT)
+### 1. Inbound audio (bot → vjudge → Deepgram STT)
 
 ```
 Bot speaks → phone network → Twilio
@@ -126,32 +126,32 @@ servers). Numbers will vary with your network.
 | Hop | One-way latency | Notes |
 |---|---|---|
 | Bot's mouth → phone network → Twilio ingress | 50-150ms | Carrier side, uncontrollable |
-| **WebSocket A: Twilio → Opkura** | **200-300ms** | Twilio US → ngrok → your laptop |
+| **WebSocket A: Twilio → VJudge** | **200-300ms** | Twilio US → ngrok → your laptop |
 | ngrok tunnel overhead | +20-50ms | Adds to either direction |
-| **WebSocket B: Opkura → Deepgram** | **200-300ms** | Your laptop → Deepgram US |
+| **WebSocket B: VJudge → Deepgram** | **200-300ms** | Your laptop → Deepgram US |
 | Deepgram STT inference | 100-300ms | Per audio chunk processed |
-| **WebSocket B: Deepgram → Opkura** | **200-300ms** | Event back to your laptop |
+| **WebSocket B: Deepgram → VJudge** | **200-300ms** | Event back to your laptop |
 | Gemini LLM HTTPS (Flash, thinking=0) | 2000-3000ms | Most of the per-turn budget |
 | Deepgram TTS HTTPS | 300-800ms | One POST per caller utterance |
-| **WebSocket A: Opkura → Twilio** | **200-300ms** | First chunk to Twilio |
+| **WebSocket A: VJudge → Twilio** | **200-300ms** | First chunk to Twilio |
 | Twilio buffer + playback to phone | 100-300ms | Per chunk played in real time |
 
-### Total: "bot speaks word → opkura knows the word"
+### Total: "bot speaks word → vjudge knows the word"
 
 ```
 Bot says word (T=0)
     │
     ▼ ~100ms       Twilio receives audio
     │
-    ▼ ~250ms       WebSocket A: Twilio → Opkura
+    ▼ ~250ms       WebSocket A: Twilio → VJudge
     │
-    ▼ ~5ms         Opkura forwards to STT
+    ▼ ~5ms         VJudge forwards to STT
     │
-    ▼ ~250ms       WebSocket B: Opkura → Deepgram
+    ▼ ~250ms       WebSocket B: VJudge → Deepgram
     │
     ▼ ~200ms       Deepgram STT processing
     │
-    ▼ ~250ms       WebSocket B: Deepgram → Opkura
+    ▼ ~250ms       WebSocket B: Deepgram → VJudge
     │
     ▼
 on_stt_final fires (~T=1050ms)
@@ -170,12 +170,12 @@ Bot stops speaking (T=0)
     │
     ▼ ~2500ms      Deepgram waits utterance_end_ms of silence
     │
-    ▼ ~250ms       UtteranceEnd event back to Opkura
+    ▼ ~250ms       UtteranceEnd event back to VJudge
     │
     ▼ ~1500ms      Our GRACE_PERIOD_S confirmation
     │
     ▼
-Opkura declares "bot turn ended" (~T=4750ms)
+VJudge declares "bot turn ended" (~T=4750ms)
 ```
 
 **~4.5-5 seconds** of mandatory wait just to confirm the bot is done.
@@ -245,7 +245,7 @@ What happens with `utterance_end_ms=2500 + grace=1500`:
 ```
 T=0       Bot finishes "...used for this purpose."
 T=2500    Deepgram fires UtteranceEnd (silence reached threshold)
-T=2500    Opkura starts 1.5s grace period, watching for resume
+T=2500    VJudge starts 1.5s grace period, watching for resume
 T=2800    Bot resumes: "Please also be aware..."
 T=2800    STT interim fires → _speech_started=True (grace catches it ✓)
           → loop back to wait for next UtteranceEnd
@@ -260,7 +260,7 @@ T=0       Bot finishes sentence
 T=2500    UtteranceEnd fires
 T=2500    Grace 1.5s starts
 T=4000    Grace expires with no resume detected
-T=4000    Opkura declares "turn ended" — calls Gemini → caller speaks
+T=4000    VJudge declares "turn ended" — calls Gemini → caller speaks
 T=4200    Bot resumes speaking → caller's audio collides → BARGE
 ```
 
@@ -285,7 +285,7 @@ every real turn end.
 ### Endpointing doesn't help with barging
 
 A common misconception: bump `endpointing` from 300ms → 1500ms to "make
-opkura wait longer for the bot."
+vjudge wait longer for the bot."
 
 This is **wrong**. `endpointing` only controls when transcripts get
 finalized — when interim→final transitions happen. It does **not** affect
@@ -306,7 +306,7 @@ duration. It runs in-process (~5ms per frame) — no WebSocket roundtrip.
 With Silero replacing Deepgram UtteranceEnd:
 
 T=0       Bot stops speaking
-T=250     Audio reaches Opkura via WebSocket A
+T=250     Audio reaches VJudge via WebSocket A
 T=255     Silero processes (CPU-local)
 T=305     Silero confirms 50ms of silence → "turn ended"
 T=305     Caller starts thinking
@@ -328,8 +328,8 @@ The trade-off is:
 
 | # | Issue | Impact | Root cause |
 |---|---|---|---|
-| 1 | Bot can't parse our spoken digits (SSN, ZIP, DOB) | Auth flow blocked on every digit turn — bot says "Sorry I wasn't able to get that" repeatedly | Bot-side STT issue, not opkura's. Possibly aggravated by Aura-2 voice rendering of digits |
-| 2 | Per-turn latency ~7-10s (default path) | Bot occasionally gives up and exits with "Are you still there?" | Fundamental limit of Deepgram-based endpointing (4.5s) + Gemini Flash (2-3s). **Mitigated by Silero VAD (toggle on via `AUTOCALLS_USE_SILERO_VAD=true`) → ~3-4s expected.** |
+| 1 | Bot can't parse our spoken digits (SSN, ZIP, DOB) | Auth flow blocked on every digit turn — bot says "Sorry I wasn't able to get that" repeatedly | Bot-side STT issue, not vjudge's. Possibly aggravated by Aura-2 voice rendering of digits |
+| 2 | Per-turn latency ~7-10s (default path) | Bot occasionally gives up and exits with "Are you still there?" | Fundamental limit of Deepgram-based endpointing (4.5s) + Gemini Flash (2-3s). **Mitigated by Silero VAD (toggle on via `VJUDGE_USE_SILERO_VAD=true`) → ~3-4s expected.** |
 | 3 | Mid-turn pauses occasionally barge (default path) | Caller speaks while bot still has more to say → bot hears interruption | `utterance_end_ms + grace = 4000ms` is at the edge of observed bot pauses (~3s). **Mitigated by Silero VAD — audio-domain detection doesn't trigger on silence alone.** |
 | 4 | Bot tool errors cascade | Session terminated mid-flow, bot loops on "Are you still there?" | Resurgent backend tool bug (`get_customer_names_by_ani` returns "Session terminated") |
 | 5 | Caller LLM occasionally engages past Mini-Miranda | Test runs longer than needed, new failure modes possible | Persona prompt edge cases — fixed per-scenario via "END-OF-TEST TRIGGER" + "NO DTMF" sections |
@@ -342,7 +342,7 @@ The trade-off is:
 
 | Change | Where | Toggle |
 |---|---|---|
-| **Silero VAD as turn-end signal** (replaces Deepgram UtteranceEnd) | `opkura/transport/vad.py`, integrated in `_wait_for_bot_turn` Phase 2 | `AUTOCALLS_USE_SILERO_VAD=true` in `.env`. Default false (legacy path). |
+| **Silero VAD as turn-end signal** (replaces Deepgram UtteranceEnd) | `vjudge/transport/vad.py`, integrated in `_wait_for_bot_turn` Phase 2 | `VJUDGE_USE_SILERO_VAD=true` in `.env`. Default false (legacy path). |
 
 When Silero VAD is enabled, Phase 2 of `_wait_for_bot_turn` polls the
 local Silero model's `time_since_voice_s()` instead of awaiting

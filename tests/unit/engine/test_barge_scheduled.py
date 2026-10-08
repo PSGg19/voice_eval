@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from opkura.engine.caller import AICallerEngine
-from opkura.engine.barge import ScheduledTriggerEvaluator
-from opkura.core.models import (
+from vjudge.engine.caller import AICallerEngine
+from vjudge.engine.barge import ScheduledTriggerEvaluator
+from vjudge.core.models import (
     BargeInConfig,
     CallResult,
     CallStatus,
@@ -17,7 +17,7 @@ from opkura.core.models import (
     Scenario,
     ScheduledTrigger,
 )
-from opkura.core.scenario_loader import load
+from vjudge.core.scenario_loader import load
 
 
 def _scheduled_scenario(triggers: list[ScheduledTrigger], max_turns: int = 30) -> Scenario:

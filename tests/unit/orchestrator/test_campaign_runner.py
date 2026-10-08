@@ -14,14 +14,14 @@ from typing import Optional
 
 import pytest
 
-from opkura.core.log_context import worker_id_var
-from opkura.core.models import (
+from vjudge.core.log_context import worker_id_var
+from vjudge.core.models import (
     Campaign,
     CallResult,
     CallStatus,
     EvaluationResult,
 )
-from opkura.orchestrator.campaign_runner import CampaignRunner
+from vjudge.orchestrator.campaign_runner import CampaignRunner
 
 
 def _make_campaign(

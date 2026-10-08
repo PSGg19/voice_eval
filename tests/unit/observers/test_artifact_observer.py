@@ -5,12 +5,12 @@ import json
 
 import pytest
 
-from opkura.observers.artifact_observer import (
+from vjudge.observers.artifact_observer import (
     ArtifactObserver,
     run_summary_key,
     transcript_key,
 )
-from opkura.observers.events import (
+from vjudge.observers.events import (
     BotTurn,
     CallerTurn,
     Generation,

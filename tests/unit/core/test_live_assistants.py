@@ -3,7 +3,7 @@
 This exists because of a specific incident: on 2026-08-24 a text scenario was
 aimed at Veros CI OB (assistant 1160, 13,399 real accounts), authenticated, and
 the post-call integration POSTed a real application number to the client's
-production workflow API. Nothing in opkura objected.
+production workflow API. Nothing in vjudge objected.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from opkura.core.live_assistants import load, lookup
+from vjudge.core.live_assistants import load, lookup
 
 
 def _list(tmp_path: Path, body: str) -> Path:
@@ -76,7 +76,7 @@ def test_malformed_yaml_yields_an_empty_map(tmp_path, caplog):
     p = tmp_path / "live-assistants.yaml"
     p.write_text("assistants: [unclosed", encoding="utf-8")
     import logging
-    with caplog.at_level(logging.WARNING, logger="opkura.core.live_assistants"):
+    with caplog.at_level(logging.WARNING, logger="vjudge.core.live_assistants"):
         assert load(p, refresh=True) == {}
     # silently guarding nothing is the worst outcome, so it must be logged
     assert "INACTIVE" in caplog.text

@@ -35,7 +35,7 @@ from typing import Any
 
 from twilio.rest import Client
 
-from opkura.core.config import Settings
+from vjudge.core.config import Settings
 
 # Default target = the Resurgent bot number we already use in A-001.
 # Brief calls (3s) won't disrupt their bot but DO consume concurrent

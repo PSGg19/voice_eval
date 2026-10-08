@@ -7,7 +7,7 @@ import time
 import numpy as np
 import pytest
 
-from opkura.transport.vad import (
+from vjudge.transport.vad import (
     FRAME_BYTES_PCM16,
     SAMPLE_RATE,
     SileroBotVAD,

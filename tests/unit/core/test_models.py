@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from opkura.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationCriterion,

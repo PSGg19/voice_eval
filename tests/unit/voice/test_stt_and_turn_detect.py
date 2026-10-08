@@ -10,16 +10,16 @@ import asyncio
 
 import pytest
 
-from opkura.frames import BotFinalSpeech, BotPartialSpeech, BotTurnEnded
-from opkura.voice.frames import (
+from vjudge.frames import BotFinalSpeech, BotPartialSpeech, BotTurnEnded
+from vjudge.voice.frames import (
     CallEnded,
     InboundAudio,
     SpeakEnded,
     SpeechStarted,
     UtteranceBoundary,
 )
-from opkura.voice.stt_processor import STTProcessor
-from opkura.voice.turn_detect import TurnDetector
+from vjudge.voice.stt_processor import STTProcessor
+from vjudge.voice.turn_detect import TurnDetector
 
 from tests.unit.voice.test_processor import run_processor
 

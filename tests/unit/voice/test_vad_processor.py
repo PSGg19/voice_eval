@@ -6,13 +6,13 @@ import time
 
 import pytest
 
-from opkura.voice.frames import (
+from vjudge.voice.frames import (
     CallEnded,
     InboundAudio,
     SpeechStarted,
     UtteranceBoundary,
 )
-from opkura.voice.vad_processor import VADProcessor
+from vjudge.voice.vad_processor import VADProcessor
 
 from tests.unit.voice.test_processor import run_processor
 

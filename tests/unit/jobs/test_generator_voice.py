@@ -7,7 +7,7 @@ nothing in the result says so — it just passes. Observed on job_4ccab2353f57.
 
 import yaml
 
-from opkura.jobs.generator import (
+from vjudge.jobs.generator import (
     EXAMPLE_SCENARIO,
     _validate,
     dump_scenario,
@@ -76,7 +76,7 @@ def test_normalise_doc_replaces_a_malformed_tts_block():
 
 def test_the_injected_block_survives_lint_and_the_real_loader(tmp_path):
     """The check that matters: a scenario carrying the injected voice must pass
-    BOTH opkura's linter and load_scenario, since the campaign runner uses the
+    BOTH vjudge's linter and load_scenario, since the campaign runner uses the
     loader and lint alone has passed loader-invalid scenarios before."""
     doc, changed = normalise_doc(dict(EXAMPLE_SCENARIO), None, ["es-US"])
     assert changed is True

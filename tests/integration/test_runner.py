@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from opkura.core.config import Settings
-from opkura.core.models import CallResult, CallStatus, EvaluationResult, LLMConfig, Scenario
-from opkura.orchestrator.runner import EVALUATOR_TEMPERATURE, EVALUATOR_TIMEOUT_S, TestRunner, detect_schema
+from vjudge.core.config import Settings
+from vjudge.core.models import CallResult, CallStatus, EvaluationResult, LLMConfig, Scenario
+from vjudge.orchestrator.runner import EVALUATOR_TEMPERATURE, EVALUATOR_TIMEOUT_S, TestRunner, detect_schema
 
 
 def _write(tmp_path: Path, body: str) -> str:
@@ -20,7 +20,7 @@ def _write(tmp_path: Path, body: str) -> str:
 
 def _runner_with(settings_overrides: dict) -> TestRunner:
     # Force empty API key defaults so the test isn't influenced by developer
-    # env vars (AUTOCALLS_GEMINI_API_KEY etc.) — init kwargs win over env
+    # env vars (VJUDGE_GEMINI_API_KEY etc.) — init kwargs win over env
     # vars in pydantic-settings, so this guarantees isolation.
     base = dict(
         twilio_account_sid="x",
@@ -33,9 +33,9 @@ def _runner_with(settings_overrides: dict) -> TestRunner:
     )
     base.update(settings_overrides)
     settings = Settings(**base, _env_file=None)
-    with patch("opkura.orchestrator.runner.CallManager"), \
-         patch("opkura.orchestrator.runner.DeepgramTTS"), \
-         patch("opkura.orchestrator.runner.PgResultStore"):
+    with patch("vjudge.orchestrator.runner.CallManager"), \
+         patch("vjudge.orchestrator.runner.DeepgramTTS"), \
+         patch("vjudge.orchestrator.runner.PgResultStore"):
         # persist_result=False matters more than the PgResultStore patch
         # above: `TestRunner.store` is LAZY, so the store is constructed at
         # save time — after this patch context has exited — and every run
@@ -129,9 +129,9 @@ def test_api_key_for_accepts_matching_provider_and_model():
 @pytest.mark.parametrize(
     "model,env_var",
     [
-        ("gemini-2.5-flash", "AUTOCALLS_GEMINI_API_KEY"),
-        ("claude-sonnet-4-6", "AUTOCALLS_ANTHROPIC_API_KEY"),
-        ("gpt-4o", "AUTOCALLS_OPENAI_API_KEY"),
+        ("gemini-2.5-flash", "VJUDGE_GEMINI_API_KEY"),
+        ("claude-sonnet-4-6", "VJUDGE_ANTHROPIC_API_KEY"),
+        ("gpt-4o", "VJUDGE_OPENAI_API_KEY"),
     ],
 )
 def test_api_key_for_raises_when_key_not_configured(model, env_var):
@@ -177,8 +177,8 @@ async def test_run_evaluator_uses_low_temperature_not_scenario_temperature():
             captured["observed"] = observed
             return EvaluationResult(overall_passed=True, overall_reasoning="ok")
 
-    with patch("opkura.orchestrator.runner.Evaluator", FakeEvaluator), \
-         patch("opkura.orchestrator.runner.get_client"):
+    with patch("vjudge.orchestrator.runner.Evaluator", FakeEvaluator), \
+         patch("vjudge.orchestrator.runner.get_client"):
         result = CallResult(flow_name="t", target="+1", status=CallStatus.COMPLETED)
         ev = await runner._run_evaluator(scenario, result)
 
@@ -201,9 +201,9 @@ async def test_run_evaluator_times_out_to_malformed_verdict(monkeypatch):
             await asyncio.sleep(10)  # would hang past our patched timeout
 
     # Patch the timeout to a tiny value so the test runs fast
-    monkeypatch.setattr("opkura.orchestrator.runner.EVALUATOR_TIMEOUT_S", 0.05)
-    with patch("opkura.orchestrator.runner.Evaluator", HangingEvaluator), \
-         patch("opkura.orchestrator.runner.get_client"):
+    monkeypatch.setattr("vjudge.orchestrator.runner.EVALUATOR_TIMEOUT_S", 0.05)
+    with patch("vjudge.orchestrator.runner.Evaluator", HangingEvaluator), \
+         patch("vjudge.orchestrator.runner.get_client"):
         result = CallResult(flow_name="t", target="+1", status=CallStatus.COMPLETED)
         ev = await runner._run_evaluator(scenario, result)
 
@@ -224,8 +224,8 @@ async def test_run_evaluator_crash_to_malformed_verdict():
         async def evaluate(self, transcript):
             raise RuntimeError("boom: upstream LLM 500")
 
-    with patch("opkura.orchestrator.runner.Evaluator", CrashingEvaluator), \
-         patch("opkura.orchestrator.runner.get_client"):
+    with patch("vjudge.orchestrator.runner.Evaluator", CrashingEvaluator), \
+         patch("vjudge.orchestrator.runner.get_client"):
         result = CallResult(flow_name="t", target="+1", status=CallStatus.COMPLETED)
         ev = await runner._run_evaluator(scenario, result)
 

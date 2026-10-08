@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from opkura.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     LLMConfig,
@@ -24,10 +24,10 @@ from opkura.core.models import (
     Scenario,
     TTSConfig,
 )
-from opkura.engine.caller import CallerTurn
-from opkura.engine.conversation import ConversationEngine, Termination
-from opkura.transport.text import BotTurn
-from opkura.transport.text_adapter import TextFrameAdapter
+from vjudge.engine.caller import CallerTurn
+from vjudge.engine.conversation import ConversationEngine, Termination
+from vjudge.transport.text import BotTurn
+from vjudge.transport.text_adapter import TextFrameAdapter
 
 
 def _scenario(max_turns: int = 30) -> Scenario:

@@ -13,14 +13,14 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from opkura.queue.leases import (
+from vjudge.queue.leases import (
     LEASE_HISTORY,
     LeaseManager,
     Reaper,
     lease_key,
     retry_or_dead,
 )
-from opkura.queue.streams import DEAD_STREAM, StageQueue
+from vjudge.queue.streams import DEAD_STREAM, StageQueue
 
 NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=timezone.utc)
 
