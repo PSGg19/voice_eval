@@ -148,7 +148,15 @@ class Settings(BaseSettings):
     # llm-studio is worth more. Set `is_test: true` per scenario when you
     # specifically need the compliance event suppressed.
     # Env: AUTOCALLS_TEXT_IS_TEST=true
+    #
+    # voice_is_test is the SAME trade for voice calls, where the intent
+    # travels as the X-Is-Test SIP header. It was hardwired to "1", which
+    # made every voice run invisible in llm-studio's conversations view —
+    # the exact cost the text default already rejected. Same default, same
+    # reasoning; set true when the compliance event must be suppressed.
+    # Env: AUTOCALLS_VOICE_IS_TEST=true
     text_is_test: bool = False
+    voice_is_test: bool = False
     # Per-turn HTTP budget. A bot turn is an LLM call plus any tool calls, so
     # the read timeout has to be generous — 90s covers a slow tool chain.
     text_runtime_read_timeout: float = 90.0

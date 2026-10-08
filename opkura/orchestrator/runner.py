@@ -32,6 +32,7 @@ from opkura.observers import (
     run_dispatcher,
 )
 from opkura.observers import emit as emit_event
+from opkura.observers.dispatcher import current_dispatcher
 from opkura.engine.assertions import evaluate_assertions
 from opkura.engine.evaluator import Evaluator
 from opkura.legacy.flow import FlowEngine
@@ -467,6 +468,10 @@ class TestRunner:
             reconnect_ws_url=f"{settings.ws_public_url}/ws/{session_id}",
             dtmf_transport=settings.dtmf_transport,
             dtmf_reconnect_timeout_s=settings.dtmf_reconnect_timeout_s,
+            # Hand the runner's observer dispatcher across the task-tree gap:
+            # the chain runs under the server's websocket handler, which never
+            # inherited this context, and voice traces were bare roots.
+            dispatcher=current_dispatcher(),
         )
 
     async def _run_v2_scenario_body(
@@ -795,13 +800,13 @@ class TestRunner:
             if stream_session is not None:
                 try:
                     logwriter.save_audio(stream_session.save_recording)
-                    bot_wav = logwriter.dir / "bot.wav"
-                    caller_wav = logwriter.dir / "caller.wav"
                     paths = {}
-                    if bot_wav.exists():
-                        paths["bot"] = str(bot_wav)
-                    if caller_wav.exists():
-                        paths["caller"] = str(caller_wav)
+                    # "mixed" is the dual-channel conversation file (bot left,
+                    # opkura right) — the one a human actually listens to.
+                    for kind in ("mixed", "bot", "caller"):
+                        wav = logwriter.dir / f"{kind}.wav"
+                        if wav.exists():
+                            paths[kind] = str(wav)
                     if paths:
                         result.recording_paths = paths
                 except Exception as exc:

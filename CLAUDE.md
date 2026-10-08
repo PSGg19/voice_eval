@@ -6,6 +6,99 @@ doc to read (and the one to hand to other people). It assumes no repo access, no
 local install and a hosted URL. Everything below is host-side detail that a
 caller neither needs nor can act on.
 
+---
+
+## Setting up and running the stack (Claude: this is your runbook)
+
+When a human asks you to set opkura up or run tests through it, do this —
+don't reinvent it from the README:
+
+**1. One-time setup** (idempotent — also the "after a git pull" command; it
+runs DB migrations):
+
+```bash
+./scripts/setup.sh
+```
+
+It checks the toolchain, creates the venv + installs deps, starts brew
+`postgresql@14` + `redis` (the docker copies in the compose file are unused —
+native services shadow them), creates the `opkura` DB, runs
+`alembic upgrade head`, brings up the observability containers
+(`docker compose --profile logs --profile tracing`), provisions Grafana's
+Loki datasource, builds `../opkura-web`, and runs the test suite. If the
+suite fails, read `.dev/setup-pytest.log` — the script prints the two usual
+causes (containers still warming → re-run; ambient env → it prints the
+`env | grep` to check).
+
+**Secrets are human-only — ask, never guess:**
+- `.env` (git-ignored): Twilio SID/token/number, Deepgram key, Gemini key,
+  `AUTOCALLS_OSV_ACCESS_TOKEN` (a ~8h SkitAdmin JWT — the human copies it
+  from a logged-in llm-studio DevTools session; a 401 anywhere means it
+  expired), SIP trunk vars (`AUTOCALLS_CALL_TRANSPORT=sip`,
+  `AUTOCALLS_SIP_DESTINATION_HOST`, `AUTOCALLS_SIP_TRUNK_NUMBER`), and
+  `AUTOCALLS_QUEUE_ENABLED=true`. A colleague's fastest start is copying a
+  working `.env` from a teammate and refreshing the OSV token.
+- `~/.opkura-obs.env` (setup.sh writes a template): observability env.
+  Langfuse needs a one-time project created at http://localhost:3200 and its
+  keys filled in (plus `NEXT_PUBLIC_LANGFUSE_PROJECT_ID` in
+  `../opkura-web/.env.local`).
+
+**2. Daily loop:**
+
+```bash
+./scripts/start.sh   # cloudflared tunnel (auto-rewrites AUTOCALLS_PUBLIC_URL
+                     # in .env) → opkura serve :8765 → one queue worker → web
+                     # console :3400. Logs in .dev/*.log.
+./scripts/stop.sh
+```
+
+**3. Run a test call.** Two transports, both working end-to-end:
+
+- **Voice** (a REAL phone call, ~2 min, costs money): POST to the API —
+
+  ```bash
+  curl -sX POST localhost:8765/v1/runs -H 'content-type: application/json' -d '{
+    "scenario_id": "<GET /v1/scenarios>", "region": "us", "transport": "sip",
+    "variable_set_id": "<an is_synthetic-attested set>",
+    "acknowledge_customer_data": true }'
+  ```
+
+  It flows `queued → running → evaluating → completed` through the queue;
+  the run page at http://localhost:3400/runs/<uuid> shows the transcript,
+  verdict, the stereo call recording, and deep links to that call's logs
+  (Grafana/Loki), trace (Phoenix + Langfuse — per-turn tree with LLM
+  prompts/completions and the judge), and the bot-side view in llm-studio.
+
+- **Text** (no phone call — the same flow over OSV's text runtime): same
+  POST with `"transport": "text"`. Needs a fresh OSV token. Text also
+  supports deterministic `assert:` blocks (see below).
+
+  Clearly-synthetic `vars_overrides` in the POST work without a variable
+  set; real-looking values are refused (422 `pii_value_detected`) unless an
+  attested `is_synthetic` variable set covers them — that attestation is a
+  human decision, never yours.
+
+  CLI alternative (`opkura run <scenario.yaml>`) is self-contained but binds
+  :8765 — stop `serve` first.
+
+**Scaling:** `serve` holds many concurrent voice calls on one event loop
+(load-tested at 100); extra `opkura worker --name w2 [--slots N --reserve M]`
+processes share text/evaluate/settle. Admission budgets + kill switch:
+`GET/PUT /v1/admission`, live on the console dashboard.
+
+**Postman:** a full collection (29 requests, sample payloads) lives in the
+sibling repo `../postman/collections/opkura/`.
+
+**When something is off** — the symptom → fix table is in
+[`docs/local-dev.md`](docs/local-dev.md). The classic: a run stuck ~6 min
+then failing with an empty transcript = the tunnel died → `./scripts/start.sh`.
+
+**Known-pending (as of 2026-09-03):** India voice dialing awaits LiveKit
+trunk coordinates (`AUTOCALLS_LIVEKIT_SIP_*`) — India works for job-mode
+seeding/generation and text, not voice dialing. The Veros IB 2.0 bot itself
+is flaky on QA-10 (sometimes omits the day in the due date) — that's a bot
+bug the harness correctly catches, not a harness failure.
+
 Opkura places a **real phone call to a voice bot**, plays the caller, and judges
 the result. Three ways to run it:
 

@@ -73,6 +73,21 @@ def emit(event: Any) -> None:
         dispatcher.emit(event)
 
 
+def current_dispatcher() -> Optional[Dispatcher]:
+    """The dispatcher installed for this task subtree, if any. Lets a caller
+    hand it to work running OUTSIDE its own context — a websocket handler's
+    task tree drives the voice chain, and events emitted there would
+    otherwise be silent no-ops."""
+    return _dispatcher_var.get()
+
+
+def install_dispatcher(dispatcher: Optional[Dispatcher]) -> None:
+    """Adopt a dispatcher inside a task that did not inherit it. Applies to
+    the current task and every task it spawns afterwards."""
+    if dispatcher is not None:
+        _dispatcher_var.set(dispatcher)
+
+
 @contextmanager
 def run_dispatcher(observers: Sequence[Observer]) -> Iterator[Optional[Dispatcher]]:
     """Install observers for the duration of one run (this task subtree)."""

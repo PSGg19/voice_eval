@@ -419,10 +419,30 @@ class StageWorker:
         runner = self._judge_runner()
         runner._run_assertions(scenario, result)
 
+        # The judge's LLM calls belong in the run's trace, but the trace
+        # closed at RunFinished in another process. Collect the Generation
+        # events here (a local dispatcher makes ObservedLLM's emits land)
+        # and append them under the run's pinned trace/root ids afterwards.
+        import time as _time
+
+        from opkura.observers.dispatcher import run_dispatcher
+        from opkura.observers.events import Generation
+
+        judged_generations: list = []
+
+        class _CollectGenerations:
+            def on_event(self, event) -> None:
+                if isinstance(event, Generation):
+                    judged_generations.append(event)
+
+        eval_started_ns = _time.time_ns()
         with Session(self.engine) as session:
             run = self._load(session, entry)
             if self._should_llm_judge(run, result):
-                result.evaluation = await runner._run_evaluator(scenario, result)
+                with run_dispatcher([_CollectGenerations()]):
+                    result.evaluation = await runner._run_evaluator(
+                        scenario, result
+                    )
             else:
                 from opkura.core.models import EvaluationResult
 
@@ -436,6 +456,20 @@ class StageWorker:
             run.passed = result.passed
             run.verdict = _verdict_dict(result)
             session.commit()
+
+        if judged_generations:
+            from opkura.connectors.tracing import record_detached_evaluation
+
+            ev = result.evaluation
+            record_detached_evaluation(
+                str(entry.run_uuid),
+                started_ns=eval_started_ns,
+                ended_ns=_time.time_ns(),
+                passed=getattr(ev, "overall_passed", None),
+                reasoning=getattr(ev, "overall_reasoning", "") or "",
+                transcript_turns=len(result.transcript or []),
+                generations=judged_generations,
+            )
 
         await self.queue.enqueue(
             "settle", run_uuid=entry.run_uuid,
@@ -460,18 +494,25 @@ class StageWorker:
             run.error = run.error or obs.get("error", "")
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
-        # Bot-side correlation happens HERE, not in converse: by settle the
-        # call has been over for a full evaluate stage, so OSV's post-call
-        # write has had time to land. Best-effort by design — a correlation
-        # miss must never fail a settled run.
-        try:
-            await self._correlate_voice(entry)
-        except Exception as exc:
-            import logging
+        # Bot-side correlation runs DETACHED from settle: OSV's post-call
+        # write can lag a short call by more than the settle lease allows,
+        # and a reclaimed settle would skip correlation entirely (the row is
+        # already 'completed'). Best-effort by design — a correlation miss
+        # must never fail a settled run, and the task retries on its own
+        # clock instead of the lease's.
+        async def _correlate_detached() -> None:
+            try:
+                await self._correlate_voice(entry)
+            except Exception as exc:
+                import logging
 
-            logging.getLogger(__name__).warning(
-                "voice correlation failed for %s: %s", entry.run_uuid, exc
-            )
+                logging.getLogger(__name__).warning(
+                    "voice correlation failed for %s: %s", entry.run_uuid, exc
+                )
+
+        asyncio.create_task(
+            _correlate_detached(), name=f"correlate:{entry.run_uuid}"
+        )
 
     async def _correlate_voice(self, entry: Entry) -> None:
         """Resolve a voice run's opkura session id (== its run uuid, P6) to
@@ -522,11 +563,11 @@ class StageWorker:
 
         from opkura.jobs.pipeline import find_interaction_by_session_id
 
-        # OSV's post-call write can lag the hangup by seconds — one retry
-        # inside the lease window covers the common case; a persistent miss
-        # stays a miss (best-effort, never blocks settling).
+        # OSV's post-call write can lag the hangup — especially on short
+        # calls. Detached from the settle lease (see _settle), so patience
+        # is cheap: retry for up to ~90s, then give up quietly.
         match = None
-        for attempt in range(2):
+        for attempt in range(6):
             match = await find_interaction_by_session_id(
                 client_uuid=client_uuid,
                 session_id=run_uuid,
@@ -535,10 +576,16 @@ class StageWorker:
                 window_end=finished + timedelta(minutes=5),
                 caller_id=self.settings.twilio_phone_number,
             )
-            if match or attempt == 1:
+            if match or attempt == 5:
                 break
-            await asyncio.sleep(10)
+            await asyncio.sleep(15)
         if not match:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "voice correlation gave up for %s after 90s — the bot-side "
+                "interaction never surfaced in OSV", run_uuid,
+            )
             return
         with Session(self.engine) as session:
             run = self._load(session, entry)
@@ -546,9 +593,13 @@ class StageWorker:
                 return
             run.interaction_uuid = str(match.get("uuid") or "") or None
             # The web console builds the llm-studio deep link from
-            # config_snapshot.client_uuid — stamp it alongside.
+            # config_snapshot — stamp the client and the interaction's OWN
+            # assistant (the canonical llm-studio URL is
+            # /clients/<client>/conversations/<assistant_id>?interaction_uuid=…).
             snap = dict(run.config_snapshot or {})
             snap["client_uuid"] = client_uuid
+            if match.get("assistant_id"):
+                snap["assistant_id"] = match.get("assistant_id")
             if match.get("disposition"):
                 obs = dict(run.observations or {})
                 obs["disposition"] = match.get("disposition")

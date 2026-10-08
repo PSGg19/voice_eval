@@ -50,12 +50,25 @@ DISPOSITION_WAIT = 5.0  # seconds between re-reads
 LLM_STUDIO_BASE = "https://llm-studio.skit.ai"
 
 
-def _studio_url(client_uuid: str | None, interaction_uuid: str | None) -> Optional[str]:
+def _studio_url(
+    client_uuid: str | None,
+    interaction_uuid: str | None,
+    assistant_id: int | str | None = None,
+    region: str = "us",
+) -> Optional[str]:
+    """The verified working llm-studio shape:
+    /clients/<client>/conversations/<assistant_id>?region=<r>&preview=<interaction>
+    (without an assistant id the old query-only form is the best we can do)."""
     if not client_uuid or not interaction_uuid:
         return None
+    if assistant_id is not None:
+        return (
+            f"{LLM_STUDIO_BASE}/clients/{client_uuid}/conversations/{assistant_id}"
+            f"?region={region}&preview={interaction_uuid}"
+        )
     return (
         f"{LLM_STUDIO_BASE}/clients/{client_uuid}/conversations"
-        f"?interaction_uuid={interaction_uuid}"
+        f"?region={region}&preview={interaction_uuid}"
     )
 
 
@@ -573,7 +586,10 @@ async def run_and_report(job_id: str) -> None:
                     # clone's — not the source call's, though they have matched
                     # so far.
                     item.call_link = _studio_url(
-                        str(match.get("client_uuid") or client_uuid), item.interaction_uuid
+                        str(match.get("client_uuid") or client_uuid),
+                        item.interaction_uuid,
+                        assistant_id=match.get("assistant_id"),
+                        region=getattr(job.config, "region", "us") or "us",
                     )
                 else:
                     logger.warning(

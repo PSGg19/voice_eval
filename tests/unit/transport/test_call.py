@@ -316,7 +316,7 @@ def test_sip_transport_dials_trunk_uri_with_target_in_virtualnumber_header():
     kwargs = cm.client.calls.create.call_args.kwargs
     assert kwargs["to"] == (
         f"sip:1205@{LIVEKIT_HOST}"
-        "?X-Is-Test=1&X-Opkura-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
+        "?X-Is-Test=0&X-Opkura-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
     )
     assert kwargs["from_"] == "+12202206062"
     # TwiML/status callbacks are transport-agnostic and must not change.
@@ -396,7 +396,7 @@ def test_sip_extra_headers_merge_and_opkura_headers_win():
     with patch("opkura.transport.call.Client"):
         cm = CallManager(
             _make_sip_settings(
-                sip_extra_headers="X-Opkura-Suite=veros-ib2,X-Is-Test=0"
+                sip_extra_headers="X-Opkura-Suite=veros-ib2,X-Is-Test=1"
             )
         )
         cm.client.calls = MagicMock()
@@ -405,7 +405,9 @@ def test_sip_extra_headers_merge_and_opkura_headers_win():
 
     to = cm.client.calls.create.call_args.kwargs["to"]
     assert "X-Opkura-Suite=veros-ib2" in to
-    assert "X-Is-Test=1" in to and "X-Is-Test=0" not in to
+    # opkura's own header wins over the extra: voice_is_test defaults to
+    # False (visible in llm-studio), so the extra's "1" must lose.
+    assert "X-Is-Test=0" in to and "X-Is-Test=1" not in to
 
 
 def test_sip_transport_override_is_applied():

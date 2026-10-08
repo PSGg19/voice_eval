@@ -38,6 +38,7 @@ from opkura.engine.conversation import ConversationEngine
 from opkura.frames import CallerDTMF, CallerHangup, CallerSpeech
 from opkura.transport.dtmf import generate_sequence as generate_dtmf
 from opkura.transport.dtmf import validate_dtmf_string
+from opkura.transport.audio import MULAW_SILENCE, mulaw_stereo_wav
 from opkura.transport.audio import mulaw_to_wav as _mulaw_to_wav
 from opkura.transport.dtmf_errors import (
     DTMFReconnectTimeoutError,
@@ -93,6 +94,7 @@ class VoiceSession:
         reconnect_ws_url: str = "",
         dtmf_transport: str = "rest",
         dtmf_reconnect_timeout_s: float = 30.0,
+        dispatcher=None,
     ):
         self.conversation = conversation
         self.result = result
@@ -125,7 +127,7 @@ class VoiceSession:
         links.append(self._stt)
         links.append(detector)
         links.append(BargeProcessor(caller))
-        self._bridge = EngineBridge(conversation)
+        self._bridge = EngineBridge(conversation, dispatcher=dispatcher)
         links.append(self._bridge)
         links.append(TTSProcessor(tts_factory))
         self._audio_out = AudioOut(self._wire_send, self.serializer)
@@ -148,9 +150,14 @@ class VoiceSession:
         self._completion_event: Optional[asyncio.Event] = None
         self._completion_loop: Optional[asyncio.AbstractEventLoop] = None
 
-        # recording
+        # recording. Both tracks are kept wall-clock aligned so they can be
+        # written as one dual-channel file: the inbound stream is continuous
+        # (Twilio sends 20ms frames throughout), while OUR audio only exists
+        # while speaking — so outbound gets padded with μ-law silence up to
+        # the wall clock before every append (see _wire_send).
         self._bot_audio_buffer = bytearray()
         self._our_audio_buffer = bytearray()
+        self._audio_t0: float = 0.0
 
         self._dtmf_task: Optional[asyncio.Task] = None
         self._tail_task: Optional[asyncio.Task] = None
@@ -168,6 +175,16 @@ class VoiceSession:
         try:
             parsed = _json.loads(msg)
             if parsed.get("event") == "media":
+                if self._audio_t0:
+                    expected = int(
+                        (asyncio.get_running_loop().time() - self._audio_t0)
+                        * 8000
+                    )
+                    gap = expected - len(self._our_audio_buffer)
+                    if gap > 0:
+                        self._our_audio_buffer.extend(
+                            bytes([MULAW_SILENCE]) * gap
+                        )
                 self._our_audio_buffer.extend(
                     _b64.b64decode(parsed["media"]["payload"])
                 )
@@ -292,6 +309,9 @@ class VoiceSession:
                             frame.stream_sid, frame.call_sid)
                 continue
             if isinstance(frame, InboundAudio):
+                if not self._audio_t0:
+                    # First media frame anchors the shared recording clock.
+                    self._audio_t0 = asyncio.get_running_loop().time()
                 self._bot_audio_buffer.extend(frame.payload)
                 await self.chain.feed(frame)
                 continue
@@ -426,4 +446,15 @@ class VoiceSession:
             paths["caller"] = str(p)
             logger.info("Saved caller audio: %s (%d bytes)", p,
                         len(self._our_audio_buffer))
+        if self._bot_audio_buffer and self._our_audio_buffer:
+            # Dual-channel conversation recording (bot left, opkura right) —
+            # possible because both buffers share the wall clock (outbound is
+            # silence-padded on every append).
+            p = directory / f"{self.session_id}_mixed.wav"
+            mulaw_stereo_wav(
+                bytes(self._bot_audio_buffer),
+                bytes(self._our_audio_buffer), str(p),
+            )
+            paths["mixed"] = str(p)
+            logger.info("Saved mixed stereo audio: %s", p)
         return paths

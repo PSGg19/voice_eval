@@ -118,7 +118,10 @@ class CallManager:
             **self.settings.parsed_sip_extra_headers,
             self.settings.sip_virtual_number_header: to,
             "X-Opkura-Session-Id": session_id,
-            "X-Is-Test": "1",
+            # "1" hides the interaction from llm-studio's conversations view
+            # and suppresses only the compliance event — the same trade
+            # text_is_test already rejected. Default false: visible calls.
+            "X-Is-Test": "1" if self.settings.voice_is_test else "0",
         }
         dial_to = build_sip_uri(
             user=trunk,

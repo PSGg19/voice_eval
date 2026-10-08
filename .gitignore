@@ -57,3 +57,4 @@ logs/
 clients/*
 !clients/_examples
 !clients/live-assistants.yaml
+.dev/
