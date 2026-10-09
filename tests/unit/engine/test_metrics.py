@@ -15,7 +15,7 @@ from vjudge.engine.metrics import (
 )
 
 
-def _t(speaker, text, ms=0):
+def _t(speaker: str, text: str, ms: int = 0) -> TranscriptEntry:
     return TranscriptEntry(speaker=speaker, text=text, timestamp_ms=ms)
 
 
