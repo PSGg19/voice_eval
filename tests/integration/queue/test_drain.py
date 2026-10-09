@@ -17,8 +17,8 @@ import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 from sqlalchemy.orm import Session
 
-from vjudge.db.models import Run, Scenario as ScenarioRow
-from vjudge.queue.streams import StageQueue
+from judge_it.db.models import Run, Scenario as ScenarioRow
+from judge_it.queue.streams import StageQueue
 
 from tests.integration.queue.test_two_lanes import SlowRunner, seed
 from tests.integration.queue.test_worker_stages import get_run, make_worker
@@ -35,7 +35,7 @@ async def queue():
 
 @pytest.mark.asyncio
 async def test_drain_finishes_in_flight_and_abandons_nothing(migrated_engine, queue):
-    await queue.redis.hset("vjudge:admission:config",
+    await queue.redis.hset("judge_it:admission:config",
                            "per_assistant_max_concurrency", "50")
     run_uuids = []
     for i in range(6):
@@ -73,7 +73,7 @@ async def test_sigterm_handler_triggers_the_drain(migrated_engine, queue):
     """The signal wiring itself: SIGTERM → request_stop → loop exits."""
     import os
 
-    from vjudge.cli.worker_cmd import install_signal_handlers
+    from judge_it.cli.worker_cmd import install_signal_handlers
 
     worker = make_worker(migrated_engine, queue, SlowRunner(conversation_s=0.01))
     install_signal_handlers(asyncio.get_running_loop(), worker)

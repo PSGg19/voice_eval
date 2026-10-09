@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from vjudge.engine.caller import AICallerEngine
-from vjudge.engine.barge import ScheduledTriggerEvaluator
-from vjudge.core.models import (
+from judge_it.engine.caller import AICallerEngine
+from judge_it.engine.barge import ScheduledTriggerEvaluator
+from judge_it.core.models import (
     BargeInConfig,
     CallResult,
     CallStatus,
@@ -17,7 +17,7 @@ from vjudge.core.models import (
     Scenario,
     ScheduledTrigger,
 )
-from vjudge.core.scenario_loader import load
+from judge_it.core.scenario_loader import load
 
 
 def _scheduled_scenario(triggers: list[ScheduledTrigger], max_turns: int = 30) -> Scenario:

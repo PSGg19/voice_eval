@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from vjudge.core.rendering import (
+from judge_it.core.rendering import (
     MAX_TEMPLATE_BYTES,
     RenderError,
     render_sandboxed,

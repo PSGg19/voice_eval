@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from vjudge.voice.audio_out import AudioOut
-from vjudge.voice.frames import CallEnded, CallStarted, InboundAudio, OutboundAudio
-from vjudge.voice.serializers import CHUNK_SIZE, MULAW_SILENCE, TwilioSerializer
+from judge_it.voice.audio_out import AudioOut
+from judge_it.voice.frames import CallEnded, CallStarted, InboundAudio, OutboundAudio
+from judge_it.voice.serializers import CHUNK_SIZE, MULAW_SILENCE, TwilioSerializer
 
 from tests.unit.voice.test_processor import run_processor
 

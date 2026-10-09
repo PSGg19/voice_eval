@@ -7,13 +7,13 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from vjudge.queue.admission import CONFIG_HASH
-from vjudge.queue.fairness import (
+from judge_it.queue.admission import CONFIG_HASH
+from judge_it.queue.fairness import (
     FairDispatcher,
     setpoint_for,
     staged_gauge,
 )
-from vjudge.queue.streams import StageQueue
+from judge_it.queue.streams import StageQueue
 
 NOW = "2026-08-31T12:00:00+00:00"
 

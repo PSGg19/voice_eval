@@ -1,6 +1,6 @@
-# VJudge Job API — how to use it
+# JudgeIt Job API — how to use it
 
-You give vjudge **a list of broken calls** and **the bot's number**. It reads each
+You give judge_it **a list of broken calls** and **the bot's number**. It reads each
 call, writes a test that reproduces the problem using that call's real account
 data, phones the bot, and tells you what happened.
 
@@ -11,18 +11,18 @@ data. You don't need to run anything locally.
 
 ## What you need
 
-**The vjudge URL.** Ask whoever runs it — it's a Cloudflare tunnel address that
+**The judge_it URL.** Ask whoever runs it — it's a Cloudflare tunnel address that
 changes when the service restarts, so confirm it's current rather than reusing an
 old one.
 
 ```bash
-export VJUDGE=https://<the-cloudflare-domain>
+export JUDGE_IT=https://<the-cloudflare-domain>
 ```
 
 Check it's alive:
 
 ```bash
-curl -s $VJUDGE/health
+curl -s $JUDGE_IT/health
 ```
 
 **Your broken calls**, as llm-studio links or bare interaction uuids — both work.
@@ -38,11 +38,11 @@ That's it. No token, no login, no local install.
 ## Step 1 — Create the job
 
 ```bash
-curl -sX POST $VJUDGE/v1/jobs \
+curl -sX POST $JUDGE_IT/v1/jobs \
   -H 'content-type: application/json' \
   -d '{
     "calls": [
-      "https://llm-studio.vjudge.dev/clients/1e31f185-16ac-4211-827e-46ba19d81a29/conversations/1354?interaction_uuid=c26d1903-1111-2222-3333-444444444444",
+      "https://llm-studio.judge_it.dev/clients/1e31f185-16ac-4211-827e-46ba19d81a29/conversations/1354?interaction_uuid=c26d1903-1111-2222-3333-444444444444",
       "acb65a70-5555-6666-7777-888888888888"
     ],
     "config": {
@@ -61,7 +61,7 @@ You get a job id back straight away:
 { "job_id": "job_b22e05bdaa24", "status": "created", "scenario_count": 0 }
 ```
 
-VJudge then works in the background: it pulls each call from OSV, then writes one
+JudgeIt then works in the background: it pulls each call from OSV, then writes one
 test per call.
 
 ### The fields
@@ -69,7 +69,7 @@ test per call.
 | Field | Required | What it does |
 |---|---|---|
 | `calls[]` | **yes** | The broken calls. Full llm-studio links or bare uuids. One test is written per call. |
-| `config.target` | **yes** | The **bot's** number, E.164. This is who gets phoned. Normally the **imported clone** of the live bot, not the live DID the faulty call came in on — you don't want a test dialling production. VJudge notes the difference and correlates fine either way. |
+| `config.target` | **yes** | The **bot's** number, E.164. This is who gets phoned. Normally the **imported clone** of the live bot, not the live DID the faulty call came in on — you don't want a test dialling production. JudgeIt notes the difference and correlates fine either way. |
 | `config.region` | **yes-ish** | `us` (default), `in`, or `ca`. **Get this right** — the same call id does not exist in another region, so a wrong region looks like a wrong id. Don't copy it from the `region=` in a link; those are often wrong. |
 | `config.languages` | no | Default `["en-US"]`. Use `["en-US","es-US"]` for a bilingual bot so the test checks language handling. |
 | `config.max_concurrency` | no | Default 2. How many calls run at once. |
@@ -87,7 +87,7 @@ Start with one.
 One request that blocks until it's done. No polling loop, no webhook needed:
 
 ```bash
-curl -s "$VJUDGE/v1/jobs/job_b22e05bdaa24/wait?timeout=300"
+curl -s "$JUDGE_IT/v1/jobs/job_b22e05bdaa24/wait?timeout=300"
 ```
 
 When `"status": "ready"`, the tests exist but **nothing has been phoned yet**.
@@ -119,7 +119,7 @@ If it comes back `"settled": false`, it just needs longer. Call it again.
 ## Step 3 — Run it
 
 ```bash
-curl -sX POST $VJUDGE/v1/jobs/job_b22e05bdaa24/run \
+curl -sX POST $JUDGE_IT/v1/jobs/job_b22e05bdaa24/run \
   -H 'content-type: application/json' \
   -d '{"eval": false}'
 ```
@@ -127,15 +127,15 @@ curl -sX POST $VJUDGE/v1/jobs/job_b22e05bdaa24/run \
 Then wait again — this one takes minutes, because it's placing real calls:
 
 ```bash
-curl -s "$VJUDGE/v1/jobs/job_b22e05bdaa24/wait?timeout=900"
+curl -s "$JUDGE_IT/v1/jobs/job_b22e05bdaa24/wait?timeout=900"
 ```
 
 ### `eval: false` or `eval: true`
 
 | | |
 |---|---|
-| `"eval": false` | **VJudge phones, you judge.** You get a link to each call and a description of what it tested. You read the transcript and decide. |
-| `"eval": true` | VJudge's own AI judge decides, and each result also gets `passed` and `overall_reasoning`. |
+| `"eval": false` | **JudgeIt phones, you judge.** You get a link to each call and a description of what it tested. You read the transcript and decide. |
+| `"eval": true` | JudgeIt's own AI judge decides, and each result also gets `passed` and `overall_reasoning`. |
 
 Use `false` if you're going to look at the calls yourself — it skips an AI judge
 whose accuracy nobody has measured yet.
@@ -155,9 +155,9 @@ whose accuracy nobody has measured yet.
       "description": "Bot switched to Spanish on a short closing phrase.",
       "what_we_tested": "Auth by registered phone + SSN last-4, declined payment, then the short closing.",
       "source_interaction_uuid": "c26d1903-…",
-      "call_link": "https://llm-studio.vjudge.dev/clients/00e217e9-…/conversations?interaction_uuid=a02fd6ec-…",
+      "call_link": "https://llm-studio.judge_it.dev/clients/00e217e9-…/conversations?interaction_uuid=a02fd6ec-…",
       "interaction_uuid": "a02fd6ec-…",
-      "vjudge_session_id": "dc8747f0fa0a4a29bc6ffa3107e84e10",
+      "judge_it_session_id": "dc8747f0fa0a4a29bc6ffa3107e84e10",
       "call_status": "completed",
       "disposition": "bot_initiated_transfer",
       "bot_turns": 5,
@@ -179,17 +179,17 @@ Under `eval: false` the run still looks successful, because "success" there only
 means the call connected. This is the single most important field to glance at.
 
 A healthy result has `caller_turns` roughly matching `bot_turns`. If it's 0, the
-generated persona was broken; re-create the job, and tell whoever runs vjudge.
+generated persona was broken; re-create the job, and tell whoever runs judge_it.
 
 `disposition` is the bot's own verdict on the call and is often the clearest
 evidence — `bot_initiated_transfer` on a "why did it transfer me" bug is the
 reproduction, right there. It's written by the platform *after* the call ends, so
-vjudge waits for it; if it still comes back `null`, open the `call_link` and read
+judge_it waits for it; if it still comes back `null`, open the `call_link` and read
 the call itself rather than concluding nothing happened.
 
 If `call_link` and `interaction_uuid` are `null` the run could not be matched back
 to an interaction. Check `call_status` first; if that says `completed`, send the
-`vjudge_session_id` to whoever runs vjudge.
+`judge_it_session_id` to whoever runs judge_it.
 
 ### `warnings`
 
@@ -206,15 +206,15 @@ If you have somewhere to receive HTTP, pass `callback_url` on create or run and
 you'll get POSTed at each stage: `seeding`, `generating`, `ready`, then
 `running`, `correlating`, `completed`.
 
-If you don't, vjudge can hold them for you. Point `callback_url` at vjudge
+If you don't, judge_it can hold them for you. Point `callback_url` at judge_it
 itself:
 
 ```bash
 # on create/run:
-"callback_url": "'$VJUDGE'/v1/hooks/my-sink"
+"callback_url": "'$JUDGE_IT'/v1/hooks/my-sink"
 
 # then read the history, oldest first:
-curl -s $VJUDGE/v1/hooks/my-sink
+curl -s $JUDGE_IT/v1/hooks/my-sink
 ```
 
 ---
@@ -222,20 +222,20 @@ curl -s $VJUDGE/v1/hooks/my-sink
 ## The whole thing, copy-pasteable
 
 ```bash
-export VJUDGE=https://<the-cloudflare-domain>
+export JUDGE_IT=https://<the-cloudflare-domain>
 
-JOB=$(curl -sX POST $VJUDGE/v1/jobs -H 'content-type: application/json' -d '{
+JOB=$(curl -sX POST $JUDGE_IT/v1/jobs -H 'content-type: application/json' -d '{
   "calls": ["<llm-studio link or uuid>"],
   "config": {"target": "+18447331982", "region": "us", "languages": ["en-US"]}
 }' | jq -r .job_id)
 
 echo "job: $JOB"
-curl -s "$VJUDGE/v1/jobs/$JOB/wait?timeout=300" | jq '.status, .scenarios'
+curl -s "$JUDGE_IT/v1/jobs/$JOB/wait?timeout=300" | jq '.status, .scenarios'
 
-curl -sX POST $VJUDGE/v1/jobs/$JOB/run -H 'content-type: application/json' \
+curl -sX POST $JUDGE_IT/v1/jobs/$JOB/run -H 'content-type: application/json' \
   -d '{"eval": false}'
 
-curl -s "$VJUDGE/v1/jobs/$JOB/wait?timeout=900" | jq '.status, .results'
+curl -s "$JUDGE_IT/v1/jobs/$JOB/wait?timeout=900" | jq '.status, .results'
 ```
 
 ---
@@ -244,14 +244,14 @@ curl -s "$VJUDGE/v1/jobs/$JOB/wait?timeout=900" | jq '.status, .results'
 
 | What you see | What it means |
 |---|---|
-| `400 job mode requires VJUDGE_CALL_TRANSPORT=sip` | Server-side config. Tell whoever runs vjudge; you can't fix it from here. |
+| `400 job mode requires JUDGE_IT_CALL_TRANSPORT=sip` | Server-side config. Tell whoever runs judge_it; you can't fix it from here. |
 | `400 unknown region '…'` | Use `us`, `in` or `ca`. |
 | `400 calls must not be empty` | `calls[]` was empty. |
 | `409 job … already exists` | You reused a `job_id`. Leave it out. |
 | `409 … has no generated campaign to run` | No test came out valid. Check `scenarios[].lint_errors`. |
 | status `failed`, *no call could be seeded* | Usually **the wrong region**, or the call id doesn't exist. The error names the reason per call. Try another region. |
 | status `failed`, *no OSV token* / *OSV 401* | The server's OSV token expired. Ask the operator to refresh it — nothing you can do. |
-| Results come back but `call_link` is null | The run could not be matched to an interaction. Check `call_status`; if it says `completed`, send the `vjudge_session_id` to the operator. |
+| Results come back but `call_link` is null | The run could not be matched to an interaction. Check `call_status`; if it says `completed`, send the `judge_it_session_id` to the operator. |
 | `caller_turns: 0` | The call connected but our caller never spoke, so nothing was tested. Re-create the job; report it. |
 | Connection refused / DNS failure | The tunnel URL is stale. Get the current one. |
 

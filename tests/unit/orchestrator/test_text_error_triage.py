@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-from vjudge.core.models import CallStatus, Scenario
-from vjudge.core.region_profile import RegionProfile
-from vjudge.core.run_context import Limits, Ports, RunContext
-from vjudge.llm.base import LLMResult
-from vjudge.orchestrator.runner import TestRunner
-from vjudge.transport.text import TextTransportError
+from judge_it.core.models import CallStatus, Scenario
+from judge_it.core.region_profile import RegionProfile
+from judge_it.core.run_context import Limits, Ports, RunContext
+from judge_it.llm.base import LLMResult
+from judge_it.orchestrator.runner import TestRunner
+from judge_it.transport.text import TextTransportError
 
 
 class FakeBotTurn:

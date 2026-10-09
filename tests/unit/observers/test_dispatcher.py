@@ -5,8 +5,8 @@ import asyncio
 import logging
 import time
 
-from vjudge.observers.dispatcher import Dispatcher, emit, run_dispatcher
-from vjudge.observers.events import RunStarted
+from judge_it.observers.dispatcher import Dispatcher, emit, run_dispatcher
+from judge_it.observers.events import RunStarted
 
 
 def make_event(name: str = "s") -> RunStarted:

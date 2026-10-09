@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from vjudge.cli.main import cli_app
-from vjudge.core.lint import lint_scenario
+from judge_it.cli.main import cli_app
+from judge_it.core.lint import lint_scenario
 
 
 def _write(tmp_path: Path, body: str, name: str = "scenario.yaml") -> Path:
@@ -693,7 +693,7 @@ def test_cli_renders_bracketed_field_paths_without_eating_index(tmp_path):
 
 
 def test_cli_probe_fast_fails_when_api_key_missing(tmp_path, monkeypatch):
-    """--probe without VJUDGE_GEMINI_API_KEY must fail fast BEFORE iterating
+    """--probe without JUDGE_IT_GEMINI_API_KEY must fail fast BEFORE iterating
     scenarios — otherwise N identical errors print for an N-scenario glob.
     """
     # Settings() reads .env via pydantic-settings, so monkeypatch.delenv alone
@@ -701,7 +701,7 @@ def test_cli_probe_fast_fails_when_api_key_missing(tmp_path, monkeypatch):
     # the Settings constructor itself to return a stub with no Gemini key.
     from unittest.mock import patch
 
-    from vjudge.core.config import Settings
+    from judge_it.core.config import Settings
 
     def _no_key_settings(*a, **kw):
         return Settings(
@@ -719,11 +719,11 @@ def test_cli_probe_fast_fails_when_api_key_missing(tmp_path, monkeypatch):
     for i in range(3):
         _write(tmp_path, _valid_body(), name=f"s{i}.yaml")
     runner = CliRunner()
-    with patch("vjudge.cli.lint.Settings", _no_key_settings):
+    with patch("judge_it.cli.lint.Settings", _no_key_settings):
         res = runner.invoke(cli_app, ["lint", str(tmp_path / "s*.yaml"), "--probe"])
     assert res.exit_code == 1, res.stdout
     # Exactly one error line, not three.
-    assert res.stdout.count("--probe requires VJUDGE_GEMINI_API_KEY") == 1
+    assert res.stdout.count("--probe requires JUDGE_IT_GEMINI_API_KEY") == 1
     # And NO per-scenario PASS/FAIL output — we never entered the loop.
     assert "PASS" not in res.stdout
     assert "FAIL" not in res.stdout

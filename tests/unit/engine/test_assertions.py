@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from vjudge.core.models import AssertionSpec, CallResult, EvaluationResult
-from vjudge.engine.assertions import FAILED, INCONCLUSIVE, PASSED, evaluate_assertions
+from judge_it.core.models import AssertionSpec, CallResult, EvaluationResult
+from judge_it.engine.assertions import FAILED, INCONCLUSIVE, PASSED, evaluate_assertions
 
 
 def _by_name(report):
@@ -111,7 +111,7 @@ def test_unobserved_tools_make_a_positive_assertion_inconclusive():
     )
     outcome = _by_name(report)["must_call_tools"]
     assert outcome.status == INCONCLUSIVE
-    assert "VJUDGE_OSV_ACCESS_TOKEN" in outcome.detail
+    assert "JUDGE_IT_OSV_ACCESS_TOKEN" in outcome.detail
     assert report.failed is False
 
 

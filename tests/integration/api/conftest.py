@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vjudge.api import install_v3
-from vjudge.core.config import Settings
-from vjudge.db.models import Run
+from judge_it.api import install_v3
+from judge_it.core.config import Settings
+from judge_it.db.models import Run
 
 
 def make_settings(**over) -> Settings:
@@ -24,8 +24,8 @@ def make_settings(**over) -> Settings:
         twilio_auth_token="token",
         twilio_phone_number="+15550001111",
         deepgram_api_key="dg",
-        osv_base_url="https://llm-studio.vjudge.dev/us/api/interface",
-        text_runtime_base_url="https://llm-studio.vjudge.dev/us/api/text",
+        osv_base_url="https://llm-studio.judge_it.dev/us/api/interface",
+        text_runtime_base_url="https://llm-studio.judge_it.dev/us/api/text",
         sip_destination_host="",
         sip_trunk_number="",
         sip_destination_host_us="",

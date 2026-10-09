@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from vjudge.core.models import (
+from judge_it.core.models import (
     CallResult,
     CallStatus,
     CampaignResult,
     EvaluationCriterion,
     EvaluationResult,
 )
-from vjudge.orchestrator.campaign_reporter import (
+from judge_it.orchestrator.campaign_reporter import (
     campaign_log_dir,
     render_json,
     render_markdown,

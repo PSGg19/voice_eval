@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from vjudge.bcg.generator import BCG_VERSION, generate_bcd
-from vjudge.core.scenario_loader import BCD_DELIMITER, load
+from judge_it.bcg.generator import BCG_VERSION, generate_bcd
+from judge_it.core.scenario_loader import BCD_DELIMITER, load
 
 
 # --- generate_bcd helpers ---------------------------------------------------
 
 def _patch_llm_returning(bcd_markdown: str):
-    """Patch vjudge.bcg.generator.get_client so the LLM returns {bcd_markdown: ...}.
+    """Patch judge_it.bcg.generator.get_client so the LLM returns {bcd_markdown: ...}.
     Returns the mock client object for assertions on call args.
     """
     mock_client = AsyncMock()
@@ -22,7 +22,7 @@ def _patch_llm_returning(bcd_markdown: str):
     mock_client.model = "gemini-2.5-pro"
     mock_client.complete_json = AsyncMock(return_value={"bcd_markdown": bcd_markdown})
     mock_client.last_usage = None
-    return patch("vjudge.bcg.generator.get_client", return_value=mock_client), mock_client
+    return patch("judge_it.bcg.generator.get_client", return_value=mock_client), mock_client
 
 
 def _write_prompt(tmp_path: Path, body: str = "You are Michelle from Resurgent.") -> Path:
@@ -99,12 +99,12 @@ async def test_missing_prompt_file(tmp_path):
 
 @pytest.mark.asyncio
 async def test_missing_api_key(tmp_path, monkeypatch):
-    monkeypatch.delenv("VJUDGE_GEMINI_API_KEY", raising=False)
-    # Run from tmp_path so vjudge's Settings() doesn't pick up the project's
+    monkeypatch.delenv("JUDGE_IT_GEMINI_API_KEY", raising=False)
+    # Run from tmp_path so judge_it's Settings() doesn't pick up the project's
     # `.env` file (which would set the key and bypass the "missing" branch).
     monkeypatch.chdir(tmp_path)
     prompt = _write_prompt(tmp_path)
-    with pytest.raises(ValueError, match="VJUDGE_GEMINI_API_KEY"):
+    with pytest.raises(ValueError, match="JUDGE_IT_GEMINI_API_KEY"):
         await generate_bcd(prompt, tmp_path / "bcd.md")
 
 
@@ -116,14 +116,14 @@ async def test_missing_api_key_raises_before_output_exists_check(tmp_path, monke
     trip ("missing key") instead of two (FileExists → re-run with --regenerate
     → missing key).
     """
-    monkeypatch.delenv("VJUDGE_GEMINI_API_KEY", raising=False)
-    # Run from tmp_path so vjudge's Settings() doesn't pick up the project's
+    monkeypatch.delenv("JUDGE_IT_GEMINI_API_KEY", raising=False)
+    # Run from tmp_path so judge_it's Settings() doesn't pick up the project's
     # `.env` file (which would set the key and bypass the "missing" branch).
     monkeypatch.chdir(tmp_path)
     prompt = _write_prompt(tmp_path)
     out = tmp_path / "bcd.md"
     out.write_text("pre-existing\n", encoding="utf-8")  # would trip FileExists check
-    with pytest.raises(ValueError, match="VJUDGE_GEMINI_API_KEY"):
+    with pytest.raises(ValueError, match="JUDGE_IT_GEMINI_API_KEY"):
         await generate_bcd(prompt, out)  # no regenerate, no key — key error wins
     # Pre-existing file untouched
     assert out.read_text(encoding="utf-8") == "pre-existing\n"
@@ -182,7 +182,7 @@ async def test_api_key_from_env_var_when_kwarg_absent(tmp_path, monkeypatch):
     """Symmetric coverage with test_missing_api_key: when the env var IS set
     and no kwarg is passed, generate_bcd should succeed using the env key.
     """
-    monkeypatch.setenv("VJUDGE_GEMINI_API_KEY", "env-key")
+    monkeypatch.setenv("JUDGE_IT_GEMINI_API_KEY", "env-key")
     prompt = _write_prompt(tmp_path)
     out = tmp_path / "bcd.md"
     patcher, mock = _patch_llm_returning("# Barge Context — Bot\n\n## Modules\n1. Greeting")
@@ -239,7 +239,7 @@ async def test_invalid_llm_response_raises_value_error(tmp_path):
     mock_client.model = "gemini-2.5-pro"
     mock_client.complete_json = AsyncMock(return_value={"oops": "no bcd_markdown"})
     mock_client.last_usage = None
-    with patch("vjudge.bcg.generator.get_client", return_value=mock_client):
+    with patch("judge_it.bcg.generator.get_client", return_value=mock_client):
         with pytest.raises(ValueError, match="bcd_markdown"):
             await generate_bcd(prompt, tmp_path / "bcd.md", api_key="fake-key")
     assert not (tmp_path / "bcd.md").exists()

@@ -15,10 +15,10 @@ import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 from sqlalchemy.orm import Session
 
-from vjudge.core.models import CallResult, CallStatus, TranscriptEntry
-from vjudge.db.models import Run, RunBatch, Scenario as ScenarioRow
-from vjudge.queue.streams import StageQueue
-from vjudge.queue.worker import StageWorker
+from judge_it.core.models import CallResult, CallStatus, TranscriptEntry
+from judge_it.db.models import Run, RunBatch, Scenario as ScenarioRow
+from judge_it.queue.streams import StageQueue
+from judge_it.queue.worker import StageWorker
 
 from tests.integration.queue.test_worker_stages import (
     SCENARIO_BODY,
@@ -62,7 +62,7 @@ class SlowRunner:
         result.assertion_outcomes = []
 
     async def _run_evaluator(self, scenario, result):
-        from vjudge.core.models import EvaluationResult
+        from judge_it.core.models import EvaluationResult
 
         return EvaluationResult(overall_passed=True, overall_reasoning="ok")
 
@@ -89,7 +89,7 @@ async def test_interactive_run_starts_promptly_during_a_batch_flood(
 ):
     # Budget must not bind — this test is about LANES. Distinct targets per
     # run would also work; simpler to raise the per-assistant cap.
-    await queue.redis.hset("vjudge:admission:config",
+    await queue.redis.hset("judge_it:admission:config",
                            "per_assistant_max_concurrency", "50")
 
     with Session(migrated_engine) as session:
@@ -140,7 +140,7 @@ async def test_interactive_run_starts_promptly_during_a_batch_flood(
 
 @pytest.mark.asyncio
 async def test_batch_alone_is_capped_at_slots_minus_reserve(migrated_engine, queue):
-    await queue.redis.hset("vjudge:admission:config",
+    await queue.redis.hset("judge_it:admission:config",
                            "per_assistant_max_concurrency", "50")
     with Session(migrated_engine) as session:
         batch = RunBatch(name="flood2", config={}, status="created")

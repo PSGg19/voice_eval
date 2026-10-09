@@ -1,4 +1,4 @@
-"""Unit tests for `vjudge.transport.call` — REST DTMF redirect helper.
+"""Unit tests for `judge_it.transport.call` — REST DTMF redirect helper.
 
 Phase 3 Task 2. The Twilio `Client` constructor is instantiated lazily
 inside `CallManager.__init__`; we don't hit the network because the
@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vjudge.core.config import Settings
-from vjudge.transport.call import (
+from judge_it.core.config import Settings
+from judge_it.transport.call import (
     CallManager,
     build_dtmf_redirect_twiml,
 )
@@ -25,14 +25,14 @@ def _make_settings() -> Settings:
     return Settings(
         # `_env_file=None` makes these tests hermetic. Without it pydantic also
         # reads the developer's `.env`, so a real `.env` carrying
-        # VJUDGE_CALL_TRANSPORT=sip silently flipped the "pstn is the default"
+        # JUDGE_IT_CALL_TRANSPORT=sip silently flipped the "pstn is the default"
         # assertions — a test failing because of local config, not code.
         _env_file=None,
         twilio_account_sid="AC_test",
         twilio_auth_token="token_test",
         twilio_phone_number="+10000000000",
         deepgram_api_key="dg_test",
-        public_url="https://vjudge.example.com",
+        public_url="https://judge_it.example.com",
     )
 
 
@@ -44,13 +44,13 @@ def _make_settings() -> Settings:
 def test_build_twiml_canonical():
     twiml = build_dtmf_redirect_twiml(
         digits="4012000033330125",
-        reconnect_ws_url="wss://vjudge.example.com/ws/abc123",
+        reconnect_ws_url="wss://judge_it.example.com/ws/abc123",
     )
     expected = (
         "<Response>"
         '<Play digits="4012000033330125"/>'
         "<Connect>"
-        '<Stream url="wss://vjudge.example.com/ws/abc123"/>'
+        '<Stream url="wss://judge_it.example.com/ws/abc123"/>'
         "</Connect>"
         "</Response>"
     )
@@ -90,7 +90,7 @@ def test_build_twiml_rejects_bad_url_scheme():
     with pytest.raises(ValueError, match="ws://"):
         build_dtmf_redirect_twiml(
             digits="1234",
-            reconnect_ws_url="https://vjudge.example.com/ws/s",
+            reconnect_ws_url="https://judge_it.example.com/ws/s",
         )
 
 
@@ -108,7 +108,7 @@ def test_build_twiml_rejects_non_string_digits():
 
 
 def test_play_dtmf_and_reconnect_calls_update_with_correct_twiml():
-    with patch("vjudge.transport.call.Client") as TwClient:
+    with patch("judge_it.transport.call.Client") as TwClient:
         cm = CallManager(_make_settings())
         # The client we want to assert against is the one cm built.
         mock_call_resource = MagicMock()
@@ -118,7 +118,7 @@ def test_play_dtmf_and_reconnect_calls_update_with_correct_twiml():
         result = cm.play_dtmf_and_reconnect(
             call_sid="CA1234567890abcdef",
             digits="4012000033330125",
-            reconnect_ws_url="wss://vjudge.example.com/ws/sess1",
+            reconnect_ws_url="wss://judge_it.example.com/ws/sess1",
         )
 
     assert result == "updated_call_obj"
@@ -129,14 +129,14 @@ def test_play_dtmf_and_reconnect_calls_update_with_correct_twiml():
     twiml = update_kwargs["twiml"]
     assert '<Play digits="4012000033330125"/>' in twiml
     assert (
-        '<Stream url="wss://vjudge.example.com/ws/sess1"/>' in twiml
+        '<Stream url="wss://judge_it.example.com/ws/sess1"/>' in twiml
     )
 
 
 def test_play_dtmf_and_reconnect_validates_digits_before_calling_twilio():
     """Bad digits must fail BEFORE we hit Twilio's API — saves a round trip
     and prevents bad TwiML from ever reaching their service."""
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_settings())
         cm.client.calls = MagicMock()
 
@@ -173,7 +173,7 @@ def _mock_created_call():
 
 
 def test_make_call_returns_sid_and_passes_expected_params():
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -184,8 +184,8 @@ def test_make_call_returns_sid_and_passes_expected_params():
     create_kwargs = cm.client.calls.create.call_args.kwargs
     assert create_kwargs["to"] == "+19998887777"
     assert create_kwargs["from_"] == "+10000000000"
-    assert create_kwargs["url"] == "https://vjudge.example.com/twiml/sess-xyz"
-    assert create_kwargs["status_callback"] == "https://vjudge.example.com/status/sess-xyz"
+    assert create_kwargs["url"] == "https://judge_it.example.com/twiml/sess-xyz"
+    assert create_kwargs["status_callback"] == "https://judge_it.example.com/status/sess-xyz"
 
 
 def test_make_call_logs_full_request_and_response_at_debug(caplog):
@@ -193,19 +193,19 @@ def test_make_call_logs_full_request_and_response_at_debug(caplog):
     we send to Twilio AND every attribute Twilio returned on the call."""
     import logging
 
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
 
-        with caplog.at_level(logging.DEBUG, logger="vjudge.transport.call"):
+        with caplog.at_level(logging.DEBUG, logger="judge_it.transport.call"):
             cm.make_call(to="+19998887777", session_id="sess-xyz")
 
     log_text = " ".join(r.message for r in caplog.records)
     # Request side: params and the reconstructed twiml/status URLs.
     assert "Call request params" in log_text
     assert "sess-xyz" in log_text
-    assert "https://vjudge.example.com/twiml/sess-xyz" in log_text
+    assert "https://judge_it.example.com/twiml/sess-xyz" in log_text
     assert "initiated" in log_text and "completed" in log_text
     # Response side: the full Twilio Call properties.
     assert "Call response (full)" in log_text
@@ -222,12 +222,12 @@ def test_make_call_survives_call_object_without_properties(caplog):
     call.sid = "CA_noprops"
     call.status = "queued"
 
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=call)
 
-        with caplog.at_level(logging.DEBUG, logger="vjudge.transport.call"):
+        with caplog.at_level(logging.DEBUG, logger="judge_it.transport.call"):
             sid = cm.make_call(to="+19998887777", session_id="sess-noprops")
 
     assert sid == "CA_noprops"
@@ -241,11 +241,11 @@ def test_play_dtmf_and_reconnect_logs_count_not_raw_digits(caplog):
     string — credit-card-shaped strings shouldn't leak into logs."""
     import logging
 
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_settings())
         cm.client.calls = MagicMock()
 
-        with caplog.at_level(logging.INFO, logger="vjudge.transport.call"):
+        with caplog.at_level(logging.INFO, logger="judge_it.transport.call"):
             cm.play_dtmf_and_reconnect(
                 call_sid="CA1234",
                 digits="4012000033330125",
@@ -273,7 +273,7 @@ def _make_sip_settings(**overrides) -> Settings:
         twilio_auth_token="token_test",
         twilio_phone_number="+12202206062",
         deepgram_api_key="dg_test",
-        public_url="https://vjudge.example.com",
+        public_url="https://judge_it.example.com",
         call_transport="sip",
         sip_destination_host=LIVEKIT_HOST,
         sip_trunk_number=TRUNK,
@@ -288,10 +288,10 @@ def test_pstn_transport_is_the_default_and_dials_the_number_unchanged(monkeypatc
     The env var is cleared so a developer whose `.env` flips the default
     to sip still gets a truthful answer about what the DEFAULT is.
     """
-    monkeypatch.delenv("VJUDGE_CALL_TRANSPORT", raising=False)
+    monkeypatch.delenv("JUDGE_IT_CALL_TRANSPORT", raising=False)
     settings = _make_settings()
     assert settings.call_transport == "pstn"
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(settings)
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -306,7 +306,7 @@ def test_sip_transport_dials_trunk_uri_with_target_in_virtualnumber_header():
     """The trunk id is the user part; the YAML target rides in
     X-VirtualNumber, which LiveKit's headersToAttributes maps to the
     `virtualNumber` attribute. Caller ID stays the Twilio DID."""
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -316,18 +316,18 @@ def test_sip_transport_dials_trunk_uri_with_target_in_virtualnumber_header():
     kwargs = cm.client.calls.create.call_args.kwargs
     assert kwargs["to"] == (
         f"sip:1205@{LIVEKIT_HOST}"
-        "?X-Is-Test=0&X-VJudge-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
+        "?X-Is-Test=0&X-JudgeIt-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
     )
     assert kwargs["from_"] == "+12202206062"
     # TwiML/status callbacks are transport-agnostic and must not change.
-    assert kwargs["url"] == "https://vjudge.example.com/twiml/sess-xyz"
-    assert kwargs["status_callback"] == "https://vjudge.example.com/status/sess-xyz"
+    assert kwargs["url"] == "https://judge_it.example.com/twiml/sess-xyz"
+    assert kwargs["status_callback"] == "https://judge_it.example.com/status/sess-xyz"
 
 
 def test_sip_target_never_lands_in_the_user_part():
     """Regression guard for the addressing bug: putting the DID in the
     user part reaches the trunk but leaves virtualNumber unset."""
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -340,7 +340,7 @@ def test_sip_target_never_lands_in_the_user_part():
 
 def test_sip_virtual_number_header_name_is_configurable():
     """Must track whatever key the trunk's headersToAttributes uses."""
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings(sip_virtual_number_header="X-Bot-Did"))
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -352,7 +352,7 @@ def test_sip_virtual_number_header_name_is_configurable():
 
 
 def test_sip_default_config_sends_no_transport_param():
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -366,12 +366,12 @@ def test_sip_target_number_is_logged_even_though_it_is_header_borne(caplog):
     log must name the target separately or runs become indistinguishable."""
     import logging
 
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
 
-        with caplog.at_level(logging.INFO, logger="vjudge.transport.call"):
+        with caplog.at_level(logging.INFO, logger="judge_it.transport.call"):
             cm.make_call(to="+18447331982", session_id="sess-xyz")
 
     log_text = " ".join(r.message for r in caplog.records)
@@ -380,23 +380,23 @@ def test_sip_target_number_is_logged_even_though_it_is_header_borne(caplog):
 
 def test_sip_session_id_header_is_the_correlation_key():
     """The Twilio Call SID can't be a header (it's minted by this very
-    request), so session_id is what crosses to the bot — and vjudge maps
+    request), so session_id is what crosses to the bot — and judge_it maps
     session_id → the returned SID locally."""
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings())
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
         sid = cm.make_call(to="+18447331982", session_id="sess-corr-1")
 
-    assert "X-VJudge-Session-Id=sess-corr-1" in cm.client.calls.create.call_args.kwargs["to"]
+    assert "X-JudgeIt-Session-Id=sess-corr-1" in cm.client.calls.create.call_args.kwargs["to"]
     assert sid == "CA_created_123"
 
 
-def test_sip_extra_headers_merge_and_vjudge_headers_win():
-    with patch("vjudge.transport.call.Client"):
+def test_sip_extra_headers_merge_and_judge_it_headers_win():
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(
             _make_sip_settings(
-                sip_extra_headers="X-VJudge-Suite=veros-ib2,X-Is-Test=1"
+                sip_extra_headers="X-JudgeIt-Suite=veros-ib2,X-Is-Test=1"
             )
         )
         cm.client.calls = MagicMock()
@@ -404,14 +404,14 @@ def test_sip_extra_headers_merge_and_vjudge_headers_win():
         cm.make_call(to="+18447331982", session_id="sess-xyz")
 
     to = cm.client.calls.create.call_args.kwargs["to"]
-    assert "X-VJudge-Suite=veros-ib2" in to
-    # vjudge's own header wins over the extra: voice_is_test defaults to
+    assert "X-JudgeIt-Suite=veros-ib2" in to
+    # judge_it's own header wins over the extra: voice_is_test defaults to
     # False (visible in llm-studio), so the extra's "1" must lose.
     assert "X-Is-Test=0" in to and "X-Is-Test=1" not in to
 
 
 def test_sip_transport_override_is_applied():
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(_make_sip_settings(sip_transport="tls"))
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
@@ -421,16 +421,16 @@ def test_sip_transport_override_is_applied():
 
 
 def test_sip_auth_passed_only_when_username_configured():
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(
-            _make_sip_settings(sip_auth_username="vjudge", sip_auth_password="s3cret")
+            _make_sip_settings(sip_auth_username="judge_it", sip_auth_password="s3cret")
         )
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
         cm.make_call(to="+18447331982", session_id="sess-xyz")
 
     kwargs = cm.client.calls.create.call_args.kwargs
-    assert kwargs["sip_auth_username"] == "vjudge"
+    assert kwargs["sip_auth_username"] == "judge_it"
     assert kwargs["sip_auth_password"] == "s3cret"
 
 
@@ -439,14 +439,14 @@ def test_sip_auth_password_never_reaches_the_logs(caplog):
     debug.log — the password must be redacted there."""
     import logging
 
-    with patch("vjudge.transport.call.Client"):
+    with patch("judge_it.transport.call.Client"):
         cm = CallManager(
-            _make_sip_settings(sip_auth_username="vjudge", sip_auth_password="s3cret")
+            _make_sip_settings(sip_auth_username="judge_it", sip_auth_password="s3cret")
         )
         cm.client.calls = MagicMock()
         cm.client.calls.create = MagicMock(return_value=_mock_created_call())
 
-        with caplog.at_level(logging.DEBUG, logger="vjudge.transport.call"):
+        with caplog.at_level(logging.DEBUG, logger="judge_it.transport.call"):
             cm.make_call(to="+18447331982", session_id="sess-xyz")
 
     log_text = " ".join(r.message for r in caplog.records)
@@ -461,7 +461,7 @@ def test_sip_settings_require_a_trunk_number():
     """Misconfiguration fails at settings load, not mid-scenario."""
     import pydantic
 
-    with pytest.raises(pydantic.ValidationError, match="VJUDGE_SIP_TRUNK_NUMBER"):
+    with pytest.raises(pydantic.ValidationError, match="JUDGE_IT_SIP_TRUNK_NUMBER"):
         _make_sip_settings(sip_trunk_number="")
 
 
@@ -476,7 +476,7 @@ def test_sip_settings_require_a_destination_host():
     """Misconfiguration fails at settings load, not mid-scenario."""
     import pydantic
 
-    with pytest.raises(pydantic.ValidationError, match="VJUDGE_SIP_DESTINATION_HOST"):
+    with pytest.raises(pydantic.ValidationError, match="JUDGE_IT_SIP_DESTINATION_HOST"):
         _make_sip_settings(sip_destination_host="")
 
 
@@ -490,5 +490,5 @@ def test_sip_settings_reject_malformed_extra_headers():
 def test_sip_settings_reject_password_without_username():
     import pydantic
 
-    with pytest.raises(pydantic.ValidationError, match="VJUDGE_SIP_AUTH_USERNAME"):
+    with pytest.raises(pydantic.ValidationError, match="JUDGE_IT_SIP_AUTH_USERNAME"):
         _make_sip_settings(sip_auth_password="s3cret")

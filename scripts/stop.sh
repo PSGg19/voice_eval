@@ -15,6 +15,6 @@ done
 # belt and braces: anything holding our ports, whoever started it
 kill $(lsof -tnP -iTCP:8765 -sTCP:LISTEN) 2>/dev/null && echo "stopped :8765"
 kill $(lsof -tnP -iTCP:3400 -sTCP:LISTEN) 2>/dev/null && echo "stopped :3400"
-pkill -f "vjudge worker" 2>/dev/null && echo "stopped stray workers"
+pkill -f "judge_it worker" 2>/dev/null && echo "stopped stray workers"
 pkill -f "cloudflared tunnel --url http://localhost:8765" 2>/dev/null && echo "stopped stray tunnels"
 exit 0

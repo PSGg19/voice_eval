@@ -12,13 +12,13 @@ import time
 
 import pytest
 
-from vjudge.core.config import Settings
-from vjudge.core.models import CallStatus, Scenario
-from vjudge.core.region_profile import RegionProfile
-from vjudge.core.run_context import Limits, Ports, RunContext
-from vjudge.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS
-from vjudge.llm.base import LLMResult
-from vjudge.orchestrator.runner import TestRunner
+from judge_it.core.config import Settings
+from judge_it.core.models import CallStatus, Scenario
+from judge_it.core.region_profile import RegionProfile
+from judge_it.core.run_context import Limits, Ports, RunContext
+from judge_it.engine.caller import DEFAULT_BOT_TURN_TIMEOUT_MS
+from judge_it.llm.base import LLMResult
+from judge_it.orchestrator.runner import TestRunner
 
 
 class _Turn:

@@ -243,6 +243,6 @@ assistants:
     name: "Imported - Imported IB 2.0 v128"
 
 # Hand-maintained additions the query cannot know about — an assistant in a
-# region vjudge cannot reach, or one a human knows is customer-facing despite
+# region judge_it cannot reach, or one a human knows is customer-facing despite
 # an empty account table. Same shape as above; survives a refresh.
 extra: []

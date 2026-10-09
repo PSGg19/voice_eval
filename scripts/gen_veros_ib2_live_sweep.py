@@ -7,7 +7,7 @@ identical wording. Scenario-specific parts are the goal, the test, the gates.
 from pathlib import Path
 import textwrap
 
-OUT = Path("/Users/abhaymishra/code/internal-repos/vjudge/clients/veros/scenarios/ib2-live-sweep")
+OUT = Path("/Users/abhaymishra/code/internal-repos/judge_it/clients/veros/scenarios/ib2-live-sweep")
 TARGET = "+18883286857"
 
 # --------------------------------------------------------------------------
@@ -178,7 +178,7 @@ ENV_NOTE = """
 FAULT_ATTR = """
 ──────── FAULT ATTRIBUTION ────────
 overall_reasoning MUST start with exactly one of:
-  "PASS: ..." / "BOT FAILURE: ..." / "VJUDGE TRUNCATION: ..." /
+  "PASS: ..." / "BOT FAILURE: ..." / "JUDGE_IT TRUNCATION: ..." /
   "TEST/LLM FAILURE: ..." / "PROMPT GAP: ..."
 If the CALLER (test LLM) gave wrong values, drifted digit counts, hung up
 early or cut the bot off, attribute to TEST/LLM FAILURE — not BOT FAILURE.
