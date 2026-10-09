@@ -13,11 +13,11 @@ import pytest
 from vjudge.connectors import select
 
 
-def _f(value):
-    return lambda: value
+def _make_factory(val: str):
+    return lambda: val
 
 
-BASIC = {"none": _f("NOOP"), "redis": _f("REDIS")}
+BASIC = {"none": _make_factory("NOOP"), "redis": _make_factory("REDIS")}
 
 
 def test_default_when_unset(monkeypatch):
@@ -58,7 +58,7 @@ def test_a_failing_backend_degrades_rather_than_crashing(caplog):
 
     with caplog.at_level(logging.WARNING, logger="vjudge.connectors"):
         got = select(kind="tracing", env_var="X_BACKEND", default="none",
-                     factories={"none": _f("NOOP"), "phoenix": boom}, override="phoenix")
+                     factories={"none": _make_factory("NOOP"), "phoenix": boom}, override="phoenix")
     assert got == "NOOP"
     assert "degraded, not fatal" in caplog.text
 
@@ -77,6 +77,6 @@ def test_factories_are_lazy():
     """Off must cost nothing — an unchosen factory is never called."""
     called = []
     select(kind="k", env_var="X_BACKEND", default="none",
-           factories={"none": _f("NOOP"), "heavy": lambda: called.append(1)},
+           factories={"none": _make_factory("NOOP"), "heavy": lambda: called.append(1)},
            override="none")
     assert called == []
