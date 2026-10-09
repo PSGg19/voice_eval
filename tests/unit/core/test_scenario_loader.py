@@ -8,8 +8,8 @@ import pytest
 from vjudge.core.scenario_loader import load
 
 
-def _write(tmp_path: Path, body: str) -> Path:
-    p = tmp_path / "scenario.yaml"
+def _write(tmp_path: Path, body: str, filename: str = "scenario.yaml") -> Path:
+    p = tmp_path / filename
     p.write_text(dedent(body))
     return p
 
