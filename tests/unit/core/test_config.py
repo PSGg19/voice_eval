@@ -15,8 +15,8 @@ REQUIRED = {
 
 
 def _set_required(monkeypatch):
-    for k, v in REQUIRED.items():
-        monkeypatch.setenv(k, v)
+    for env_key, env_val in REQUIRED.items():
+        monkeypatch.setenv(env_key, env_val)
 
 
 def test_from_env_reads_vjudge_prefixed_env(monkeypatch):
