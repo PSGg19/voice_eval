@@ -1,7 +1,7 @@
 """Smoke-test: prove Twilio REST `<Play digits=>` reaches the LiveKit bot.
 
 The DTMF problem we hit (see logs around 19:55:20 on the J-001 run):
-  * VJudge generates clean DTMF audio (verified by decoding caller.wav
+  * JudgeIt generates clean DTMF audio (verified by decoding caller.wav
     back to "4012000033330125" three times — generation is flawless).
   * Audio reaches Twilio cleanly via Media Streams (event:"media").
   * LiveKit's SIP trunk only listens for RFC 2833 telephone-event/8000
@@ -26,15 +26,15 @@ after `<Play digits=>` finishes because we don't include a
 one validates the core DTMF-event delivery).
 
 Usage:
-  1. Start a J-001 (or any DTMF-path) scenario in vjudge.
-  2. Watch vjudge logs for the `Call created: sid=CA...` line and
+  1. Start a J-001 (or any DTMF-path) scenario in judge_it.
+  2. Watch judge_it logs for the `Call created: sid=CA...` line and
      also for the bot's `<DTMF:16>` prompt. The window between
      those is when you want to fire this script.
   3. Run:
        python scripts/probe_dtmf_via_rest.py CAXXXXXXXXXXXXXXXX
      Optionally override the digit string:
        python scripts/probe_dtmf_via_rest.py CAXXX 1234567890123456
-  4. Watch vjudge logs (or the bot side if you have access) for the
+  4. Watch judge_it logs (or the bot side if you have access) for the
      bot's next response. PASS = bot acknowledges the card / proceeds
      to expiry. FAIL = bot says "Sorry, I wasn't able to get that"
      a fourth time.
@@ -47,7 +47,7 @@ import sys
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
-from vjudge.core.config import Settings
+from judge_it.core.config import Settings
 
 
 DEFAULT_DIGITS = "4012000033330125"  # variables.json cardNo (test Visa PAN, declines at processor)

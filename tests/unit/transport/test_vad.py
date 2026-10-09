@@ -7,7 +7,7 @@ import time
 import numpy as np
 import pytest
 
-from vjudge.transport.vad import (
+from judge_it.transport.vad import (
     FRAME_BYTES_PCM16,
     SAMPLE_RATE,
     SileroBotVAD,

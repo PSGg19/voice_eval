@@ -1,8 +1,8 @@
-# VJudge Platform Evolution — OSV Parity, Service Mode, Observability
+# JudgeIt Platform Evolution — OSV Parity, Service Mode, Observability
 
 Status: **proposal / for review**. Nothing here is implemented.
 
-Scope: turn vjudge from a single-operator CLI tool into a service that other
+Scope: turn judge_it from a single-operator CLI tool into a service that other
 systems call, that runs for weeks without babysitting, and that can be
 debugged from the same Grafana/Loki/Tempo panes as `orchestrator-service`.
 
@@ -16,7 +16,7 @@ costs. Then hazards, then a phased plan.
 Read this. The rest of the document is reference — go to a section when you need
 the detail behind a line here.
 
-### What vjudge becomes
+### What judge_it becomes
 
 A service that runs one job well: **hold a conversation with a bot and judge it.**
 Two transports — **text** (OSV's text runtime over HTTP: cheap, fast, hundreds
@@ -24,7 +24,7 @@ concurrent, the default) and **twilio** (real PSTN: for audio, barge, DTMF, and
 latency only). Everything else moves out.
 
 ```
-llm-studio UI ──► OSV interface ──POST /v1/runs──► vjudge ──► call ──► verdict
+llm-studio UI ──► OSV interface ──POST /v1/runs──► judge_it ──► call ──► verdict
    (dropdowns)      (owns catalog,                (pipeline
                      submits runs)                 only)
                                                       │
@@ -35,17 +35,17 @@ llm-studio UI ──► OSV interface ──POST /v1/runs──► vjudge ──
 
 ### The ten decisions
 
-1. **VJudge is a pipeline.** Not a catalog, not a CRUD app, not an admin UI.
+1. **JudgeIt is a pipeline.** Not a catalog, not a CRUD app, not an admin UI.
 2. **No YAML.** A run is a JSON payload, validated by Pydantic.
-3. **OSV owns the provider catalog and the UI**, and OSV calls vjudge.
-4. **Payload sends `provider_key`;** vjudge looks up `base_url` in a ~20-row table.
+3. **OSV owns the provider catalog and the UI**, and OSV calls judge_it.
+4. **Payload sends `provider_key`;** judge_it looks up `base_url` in a ~20-row table.
 5. **LLM speaks the OpenAI schema.** New vendor = one row + one secret.
-6. **All keys in AWS Secrets Manager**, `vjudge/{vendor}-{type}`, one shared set.
-7. **Logs go to stdout → Loki**, tagged `app="vjudge"`. No log files anywhere.
+6. **All keys in AWS Secrets Manager**, `judge_it/{vendor}-{type}`, one shared set.
+7. **Logs go to stdout → Loki**, tagged `app="judge_it"`. No log files anywhere.
 8. **Every LLM call goes to Phoenix**, in its own project, tagged with the
    interaction uuid.
 9. **Postgres.** SQLite is dropped, not migrated.
-10. **If OSV is down, vjudge doesn't run.** No fallback machinery.
+10. **If OSV is down, judge_it doesn't run.** No fallback machinery.
 
 ### What we build, in four steps
 
@@ -53,13 +53,13 @@ Each step is useful on its own and doesn't need the next one.
 
 | Step | Build | Done when |
 |---|---|---|
-| **1. See what's happening** | logfmt to stdout → Loki · Prometheus metrics · Phoenix spans · redaction before any of it ships | you can paste an `interaction_uuid` into Grafana and see vjudge's and OSV's view of the same call |
+| **1. See what's happening** | logfmt to stdout → Loki · Prometheus metrics · Phoenix spans · redaction before any of it ships | you can paste an `interaction_uuid` into Grafana and see judge_it's and OSV's view of the same call |
 | **2. Stop losing state** | Postgres + Alembic · payload schema replaces YAML · `_sessions` → Redis · S3 for audio | a restart doesn't lose in-flight runs, and a 6-week-old run is still readable |
 | **3. Be callable** | `/v1/runs` + scenario registry · `providers` table + Secrets Manager · idempotency · admission control | OSV's UI can submit a run and show the result |
 | **4. Survive unattended** | run state machine · reaper · graceful drain · per-vendor backpressure · cost caps | it runs for a month without anyone watching it |
 
 Then, once those hold: the CI gate (`POST /v1/gates/{suite}`) that blocks a bad
-bot deploy. That's the payoff — everything above just makes vjudge trustworthy
+bot deploy. That's the payoff — everything above just makes judge_it trustworthy
 enough to gate on.
 
 **Deliberately deferred:** decomposing `transport/stream.py` into processors
@@ -69,12 +69,12 @@ vendor plugins (nobody has asked for one); flake detection and version-diff
 
 ### Three things that need someone else
 
-Everything above is vjudge-side work. These aren't:
+Everything above is judge_it-side work. These aren't:
 
-1. **Are vjudge's vendor keys production's keys under a different path?** If yes, a
+1. **Are judge_it's vendor keys production's keys under a different path?** If yes, a
    load test eats production's concurrency and can degrade real calls. Check Twilio
    first. *Diff the key values.* (§8)
-2. **`is_test` for *voice* calls.** Every vjudge PSTN call is recorded as a live
+2. **`is_test` for *voice* calls.** Every judge_it PSTN call is recorded as a live
    production interaction — post-call processing, compliance, analytics, webhooks
    all fire. Needs an OSV change or a caller-ID whitelist. Text mode already takes
    `is_test` as a request field. (§11.1)
@@ -82,12 +82,12 @@ Everything above is vjudge-side work. These aren't:
    payments, SMS, CRM writes through PIS. `is_test` does not gate these. Needs test
    accounts or a PIS sandbox before any suite runs at volume. (§11.4)
 3. ~~**`interaction_uuid` for *voice* runs.**~~ **SOLVED 2026-08-11 — no longer
-   needs anyone else.** vjudge now dials the LiveKit SIP host directly
-   (`VJUDGE_CALL_TRANSPORT=sip`, `transport/sip.py`) and its `X-` headers
+   needs anyone else.** judge_it now dials the LiveKit SIP host directly
+   (`JUDGE_IT_CALL_TRANSPORT=sip`, `transport/sip.py`) and its `X-` headers
    reach the bot, so a voice run is joinable without any OSV change. The trick
    was inverting the direction: instead of making OSV adopt an
    `interaction_uuid` we inject, we put **our** id on **their** row —
-   `x-vjudge-session-id` lands in `interaction_metadata` and is queryable. See
+   `x-judge_it-session-id` lands in `interaction_metadata` and is queryable. See
    §5a for the evidence. Text mode still returns the uuid on turn 1. (§5a, §5d)
 
 ---
@@ -123,7 +123,7 @@ release — which is what stops test coverage from quietly plateauing.
 ---
 
 
-## 0. Where vjudge is today
+## 0. Where judge_it is today
 
 Honest read of the current shape, because the proposals only make sense
 against it.
@@ -145,14 +145,14 @@ alternatives. Keep that habit.
 | Two event loops in two threads | `runner.py:312-316` — FastAPI runs in a thread, so completion needs `call_soon_threadsafe`, and `call_id_var` must be set in *two* places (`core/log_context.py:8-20`) |
 | Session registry is process-local | `transport/server.py:22` — `_sessions: dict`. Restart loses every in-flight call; can't scale to >1 pod |
 | No metrics at all | no `prometheus_client` anywhere |
-| Per-call `FileHandler` on a shared logger | `logwriter.py` attaches to the `vjudge` logger and filters by contextvar. Comments show this has already caused cross-call log pollution twice |
-| SQLite + one global write lock | `persistence/store.py` — `vjudge.db` is already 12 MB and is the only store |
+| Per-call `FileHandler` on a shared logger | `logwriter.py` attaches to the `judge_it` logger and filters by contextvar. Comments show this has already caused cross-call log pollution twice |
+| SQLite + one global write lock | `persistence/store.py` — `judge_it.db` is already 12 MB and is the only store |
 | Config has ad-hoc legacy aliasing | `core/config.py:47-57` `resolved_tts_transport` — a property that reconciles two env vars. One is fine; the third one will hurt |
 | No notion of the bot's identity | zero hits for `interaction`, `assistant_uuid`, `client_uuid` across the whole package |
 | CLI-only entry | `cli/main.py` starts the FastAPI server in a thread purely to serve Twilio webhooks |
 | Everything is coupled to YAML files on local disk | `core/scenario_loader.py` + `core/campaign_loader.py` + 554 lines of `core/lint.py`; `runner.py:49-66` derives log paths from `scenario.source_path`; `runner.py:69-90` sniffs schema version from file shape |
 
-That last one is the crux of your ask: vjudge currently has no idea *what* it
+That last one is the crux of your ask: judge_it currently has no idea *what* it
 called, only *which number*. Everything about correlation follows from fixing
 that.
 
@@ -179,31 +179,31 @@ Four ideas, and they're separable:
    (`app/runtime/voice/services/factory.py:52`) — 20+ vendors, uniform
    construction from a config dict.
 
-Idea 3 is the highest-leverage thing on this list for vjudge. It's what turns
+Idea 3 is the highest-leverage thing on this list for judge_it. It's what turns
 "we need better logging and metrics" from a refactor into an additive change.
 
 ### Why not take the dependency
 
-- **Independence of the test harness.** vjudge is the adversary. If it shares
+- **Independence of the test harness.** judge_it is the adversary. If it shares
   a framework with the system under test, framework bugs cancel out and the
   test goes green for the wrong reason. A latency regression inside Pipecat's
   frame scheduling would be invisible to a Pipecat-based prober.
-- **vjudge needs to misbehave on purpose.** Barge mid-utterance, DTMF during
+- **judge_it needs to misbehave on purpose.** Barge mid-utterance, DTMF during
   bot speech, silence injection, deliberately-late turn ends. Pipecat's
   interruption strategies are built to make a bot behave *well*. You'd spend
   your time fighting `min_words_interruption_strategy` rather than using it.
   (You can see OSV already needed `processors/_vendor/interruptions/` to patch
   around this from the *bot* side.)
-- **Weight.** Pipecat pulls a large tree; vjudge's value is that it's a small
+- **Weight.** Pipecat pulls a large tree; judge_it's value is that it's a small
   thing you can run 50 of.
 
 ### Recommendation
 
-Build a thin frame bus of your own — `vjudge/pipeline/` — and split
+Build a thin frame bus of your own — `judge_it/pipeline/` — and split
 `stream.py` into processors. Target shape:
 
 ```
-vjudge/pipeline/
+judge_it/pipeline/
 ├── frames.py         # AudioFrame, TranscriptionFrame, InterimFrame,
 │                     # BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
 │                     # TurnEndFrame, BargeFrame, DtmfFrame,
@@ -212,7 +212,7 @@ vjudge/pipeline/
 ├── processor.py      # Processor protocol
 └── observers.py      # Observer protocol
 
-vjudge/pipeline/processors/
+judge_it/pipeline/processors/
 ├── stt_source.py         # WS audio in  → InterimFrame/TranscriptionFrame
 ├── turn_detector.py      # → TurnEndFrame   (silero | deepgram-utterance-end)
 ├── caller_llm.py         # TurnEndFrame → caller utterance
@@ -222,7 +222,7 @@ vjudge/pipeline/processors/
 ├── recorder.py           # AudioFrame → wav        (omit for load tests)
 └── transcript_writer.py  # → CallResult.transcript
 
-vjudge/pipeline/observers/
+judge_it/pipeline/observers/
 ├── metrics_observer.py   # frames → prometheus
 ├── trace_observer.py     # frames → OTel spans
 ├── event_observer.py     # frames → structured stdout log events → Loki (§6)
@@ -339,10 +339,10 @@ phone call.
 ```
 
 Note what the vendor block does *not* contain: no `base_url`, no credential, no
-capabilities. Those come from vjudge's `providers` table and Secrets Manager,
+capabilities. Those come from judge_it's `providers` table and Secrets Manager,
 resolved at submit time (§8). `transport` and `turn_detector` sit outside
 `vendors` because they aren't providers in OSV's catalog — they're payload enums
-validated by vjudge's own schema.
+validated by judge_it's own schema.
 
 Every knob the scenario YAML had, plus the vendor block from §8 — which is the
 whole point of your ask: **STT, TTS, LLM, transport, and turn detection are all
@@ -413,7 +413,7 @@ Three real losses. Don't discover them after the migration:
 
 1. **Git-reviewable diffs.** A scenario change was a PR. Mitigate with
    immutable versions + `GET /versions/2/diff/3`, and — if the team wants PR
-   review — an `vjudge push ./scenarios/` command that syncs a directory of
+   review — an `judge_it push ./scenarios/` command that syncs a directory of
    **JSON** files into the registry. Git stays the human source of truth; the
    API stays the execution source of truth. Cheap to build, keeps the
    workflow.
@@ -427,12 +427,12 @@ Three real losses. Don't discover them after the migration:
 
 ### Migration and the CLI
 
-- **One-shot converter**: `vjudge migrate-scenarios clients/ --push`. YAML →
+- **One-shot converter**: `judge_it migrate-scenarios clients/ --push`. YAML →
   payload → registry, one version per file, `description` seeded from the
   YAML's leading comments. Don't hand-port; the corpus is large and the
   converter is ~100 lines.
-- **The CLI becomes an API client**, it doesn't die. `vjudge run
-  scenario.json` POSTs and streams status; `vjudge run --local` runs in-process
+- **The CLI becomes an API client**, it doesn't die. `judge_it run
+  scenario.json` POSTs and streams status; `judge_it run --local` runs in-process
   for development. Interactive iteration stays as fast as it is today.
 - **V1 flows (`flows/*.yaml`, `legacy/flow.py`)**: convert or drop. Given
   `legacy/` is documented as frozen, dropping is probably right — but confirm
@@ -454,7 +454,7 @@ The payload is a published contract with other teams' code on the other end.
 
 ## 3. Decision: layered config, frozen onto every run
 
-Today: `pydantic-settings` with `VJUDGE_` prefix, plus per-scenario `llm:`,
+Today: `pydantic-settings` with `JUDGE_IT_` prefix, plus per-scenario `llm:`,
 `stt:`, `tts:`, `barge_in:` blocks. In API mode you also need per-request
 overrides, and you need to be able to answer "why did *this* run behave
 differently."
@@ -545,9 +545,9 @@ ElevenLabs doesn't mean adding five top-level env vars.
 }
 ```
 
-Adding a vendor is one row in vjudge's `providers` table plus one secret in
+Adding a vendor is one row in judge_it's `providers` table plus one secret in
 Secrets Manager (§8) — then it's selectable from a payload. No env var, no code
-change, no vjudge release. For an OpenAI-compatible LLM the row is
+change, no judge_it release. For an OpenAI-compatible LLM the row is
 `{provider_key, vendor, service_type, base_url}` and nothing else (§8).
 
 ---
@@ -558,10 +558,10 @@ Mirror OSV's `main.py --mode` dispatch, and note the TODO already in that file
 about the elif-chain sprawl — don't reproduce that. Use subcommands.
 
 ```bash
-vjudge serve api      --port 8000    # control plane: submit, query, cancel
-vjudge serve worker   --concurrency 10   # executes runs
-vjudge serve media    --port 8765    # Twilio TwiML + media-stream WS (public)
-vjudge reap                          # reconciler tick (§7)
+judge_it serve api      --port 8000    # control plane: submit, query, cancel
+judge_it serve worker   --concurrency 10   # executes runs
+judge_it serve media    --port 8765    # Twilio TwiML + media-stream WS (public)
+judge_it reap                          # reconciler tick (§7)
 ```
 
 `api` and `worker` split because the API must stay responsive while calls run
@@ -617,7 +617,7 @@ The run envelope wraps the §2 scenario payload — one of `scenario` (inline) o
   "interaction_uuid":  "550e8400-e29b-41d4-a716-446655440000",
   "correlation_uuid":  "nightly-2026-08-04",
 
-  "callback_url":    "https://caller.internal/vjudge-webhook",
+  "callback_url":    "https://caller.internal/judge_it-webhook",
   "idempotency_key": "nightly-2026-08-04-A-001",
   "priority":        "normal",
   "labels": { "suite": "regression", "git_sha": "abc123", "region": "us" }
@@ -641,7 +641,7 @@ typically 60s, and a tied-up worker per in-flight call caps you at the worker
 count. So:
 
 ```
-OSV                                          vjudge
+OSV                                          judge_it
  │  POST /v1/runs  {payload, callback_url}
  │ ───────────────────────────────────────►  validate + admit
  │  ◄─── 202 {run_uuid, status:"queued"}     enqueue
@@ -658,9 +658,9 @@ OSV                                          vjudge
 there's a second reason: a WS needs sticky routing, reconnect handling, and a live
 connection per run, which at 50 concurrent runs is 50 connections to keep alive
 across deploys. A callback is a stateless POST that OSV already knows how to
-receive (`app/interface/views/webhooks.py`). VJudge → OSV over webhook; OSV →
+receive (`app/interface/views/webhooks.py`). JudgeIt → OSV over webhook; OSV →
 browser however OSV likes (its own polling or SSE). Clean seam, and the browser
-never talks to vjudge.
+never talks to judge_it.
 
 #### The callback contract
 
@@ -685,7 +685,7 @@ from "passed" to "in progress". Signed with HMAC-SHA256 + timestamp + nonce;
 retry with exponential backoff a few times, then stop and let OSV's polling catch
 up.
 
-### Batches: OSV submits many, vjudge decides the concurrency
+### Batches: OSV submits many, judge_it decides the concurrency
 
 ```
 POST /v1/campaigns
@@ -697,7 +697,7 @@ POST /v1/campaigns
       "concurrency_capped_by": "twilio_channels" }
 ```
 
-`max_concurrency` is a **request, not a setting.** VJudge clamps it against the
+`max_concurrency` is a **request, not a setting.** JudgeIt clamps it against the
 global cap and the per-vendor caps, then **echoes back what it actually chose and
 why** — so OSV's UI can honestly show "running 8 of 50, concurrency capped from 25
 by Twilio channels" instead of silently under-delivering. Callbacks fire per run,
@@ -720,7 +720,7 @@ vendor rather than by a single number:
 | Silero VAD + mulaw conversion (the only real CPU) | bounds tasks-per-process; scale out with pods |
 
 Saturation returns `429` with `Retry-After`, or queues with a visible
-`vjudge_queue_depth` — never an opaque 20-minute timeout.
+`judge_it_queue_depth` — never an opaque 20-minute timeout.
 
 ### Data isolation at concurrency
 
@@ -744,9 +744,9 @@ The reason the file-based design had to go, restated as a concurrency property:
 Log filtering then works the same at 1 run or 50:
 
 ```logql
-{app="vjudge"} | logfmt | run_uuid="…"                  # one run out of 50
-{app="vjudge"} | logfmt | correlation_uuid="nightly-…"   # one campaign
-{app="vjudge", level="ERROR"} | logfmt | worker_id="3"   # one bad worker
+{app="judge_it"} | logfmt | run_uuid="…"                  # one run out of 50
+{app="judge_it"} | logfmt | correlation_uuid="nightly-…"   # one campaign
+{app="judge_it", level="ERROR"} | logfmt | worker_id="3"   # one bad worker
 ```
 
 `seq` gives ordering within a run (§6), because Loki won't guarantee it across
@@ -783,15 +783,15 @@ Two consequences, both felt while debugging the turn-4 stall:
    a pod filter does not substitute.
 
 **Proposed OSV change** (needs approval before anyone writes it): bind
-`interaction_uuid` — and vjudge's run id when supplied — into the request's
+`interaction_uuid` — and judge_it's run id when supplied — into the request's
 logging context for its whole lifetime, so every line inherits it. With loguru
 that is a `logger.contextualize(...)` around the request handler plus a `{extra}`
 field in the sink format; no call-site edits. Against the three-part bar:
 
 - **Real problem?** Yes — one conversation is currently unreconstructable from
   logs, and the diagnostic line is the one that lacks the id.
-- **No vjudge-side workaround?** Correct. VJudge cannot add fields to OSV's log
-  lines. VJudge's own logs already carry the uuid; that is the half that works.
+- **No judge_it-side workaround?** Correct. JudgeIt cannot add fields to OSV's log
+  lines. JudgeIt's own logs already carry the uuid; that is the half that works.
 - **Small?** Yes — context binding plus a format string, no behaviour change.
 
 Until it exists, the working recipe is: get the turns from
@@ -806,7 +806,7 @@ Small, and mostly exists:
 1. A webhook receiver — `app/interface/views/webhooks.py` is the pattern.
 2. A table holding per-test-case run status, keyed by `run_uuid`, with the `seq`
    guard.
-3. Frontend polls **OSV**, not vjudge.
+3. Frontend polls **OSV**, not judge_it.
 
 ### Semantics to get right
 
@@ -815,12 +815,12 @@ Small, and mostly exists:
   `run_uuid`, HTTP 200, no second dial. Default the key to
   `interaction_uuid` when supplied. OSV's `app/background/post_call/markers.py`
   is the in-house idempotency primitive to copy.
-- **Admission control.** vjudge's binding constraint is Twilio channel
+- **Admission control.** judge_it's binding constraint is Twilio channel
   concurrency, not CPU — you already have
   `scripts/probe_twilio_concurrency.py`, so this is a known limit. Enforce a
   global cap and a per-client cap; return `429` with `Retry-After` when
   saturated rather than queueing unboundedly and timing out. Export
-  `vjudge_queue_depth` and `vjudge_admission_rejections_total`.
+  `judge_it_queue_depth` and `judge_it_admission_rejections_total`.
 - **Auth.** Service-to-service. The primary caller is **OSV's interface**
   (§8) — it owns the UI, resolves the provider config, and submits runs. Reuse
   OSV's JWT scheme (`app/interface/middleware/auth.py`) so there's one kind of
@@ -841,7 +841,7 @@ version of it doesn't work over PSTN**, and it's better to know that now.
 
 > **STATUS 2026-08-11 — largely solved; read this before acting on §5a-d.**
 > Everything below about PSTN not carrying headers is still true, and now
-> mostly moot: vjudge no longer dials PSTN for these runs. Mechanism **(a) is
+> mostly moot: judge_it no longer dials PSTN for these runs. Mechanism **(a) is
 > shipped and verified** — and needed **no OSV change at all**, contrary to
 > what (a) assumed. Mechanism **(b), the reconciler, is no longer needed** for
 > SIP runs. The `is_test` half of this problem is NOT solved: the flag now
@@ -849,11 +849,11 @@ version of it doesn't work over PSTN**, and it's better to know that now.
 
 ### Three IDs, not one
 
-Do **not** overwrite vjudge's run id with the caller's uuid. Store three:
+Do **not** overwrite judge_it's run id with the caller's uuid. Store three:
 
 | Field | Owner | Nullable | Purpose |
 |---|---|---|---|
-| `run_uuid` | vjudge | never | primary key, log field, TwiML/WS path, S3 key prefix |
+| `run_uuid` | judge_it | never | primary key, log field, TwiML/WS path, S3 key prefix |
 | `interaction_uuid` | OSV | yes → backfilled | joins to the bot's `Interaction` row, its logs, its metrics |
 | `correlation_uuid` | the caller | yes | the caller's own batch/job id (nightly suite, CI build) |
 
@@ -873,7 +873,7 @@ interaction_uuid = str(uuid.uuid4())
 self.variables["interaction_uuid"] = interaction_uuid
 ```
 
-So the caller can't hand vjudge a uuid that the bot will also use — not
+So the caller can't hand judge_it a uuid that the bot will also use — not
 without a change on the OSV side *and* a transport that can carry it. Three
 mechanisms, in order of preference:
 
@@ -884,8 +884,8 @@ Dial a **SIP URI** rather than a PSTN number. Twilio's `<Sip>` verb forwards
 agent as participant attributes (`sip.h.x-*`). Then:
 
 ```
-vjudge (mints or receives interaction_uuid)
-  → TwiML <Sip>sip:bot@trunk?X-Interaction-Uuid=…&X-VJudge-Run=…&X-Is-Test=1</Sip>
+judge_it (mints or receives interaction_uuid)
+  → TwiML <Sip>sip:bot@trunk?X-Interaction-Uuid=…&X-JudgeIt-Run=…&X-Is-Test=1</Sip>
   → LiveKit SIP participant attribute sip.h.x-interaction-uuid
   → livekit_session.py reads it
   → LLMConfigManager(interaction_uuid=…, is_test=True)
@@ -899,12 +899,12 @@ inject. Neither turned out to be necessary:
 
 - **No TwiML `<Sip>` verb.** Twilio's REST `POST /Calls` accepts a SIP URI
   directly in `To`, and fetches the TwiML at `url` *after* the SIP call
-  connects — so vjudge's existing `<Connect><Stream>` and the whole
+  connects — so judge_it's existing `<Connect><Stream>` and the whole
   media/DTMF-reattach design work unchanged. One kwarg, not a new dial flow.
 - **No OSV change.** The sketch's last two lines
   (`LLMConfigManager(interaction_uuid=…)` → `Interaction(uuid=<supplied>)`)
   are what made this cross-team. Invert the direction instead: don't make OSV
-  adopt *our* id, put *our* id on *their* row. `x-vjudge-session-id` is stored
+  adopt *our* id, put *our* id on *their* row. `x-judge_it-session-id` is stored
   in `interaction_metadata` and is queryable, which is all a join needs.
   `LLMConfigManager` never has to learn a new parameter.
 
@@ -915,7 +915,7 @@ user part:
 From: +12202206097                                   (a Twilio number)
 To:   sip:1205@581mqcm8zvu.sip.livekit.cloud:5060    (1205 = LiveKit trunk id)
         ?X-VirtualNumber=%2B18447331982              (the bot DID — selects the BOT)
-        &X-VJudge-Session-Id=<run session>
+        &X-JudgeIt-Session-Id=<run session>
         &X-Is-Test=1
 ```
 
@@ -929,7 +929,7 @@ carried:
 ```
 x-virtualnumber      = +18447331982    # %2B percent-decoded back to '+'
 virtual_number       = +18447331982    # the headersToAttributes mapping
-x-vjudge-session-id  = <run session>   # the join key
+x-judge_it-session-id  = <run session>   # the join key
 x-twilio-callsid     = CA419b539b…     # stamped by Twilio itself
 x-is-test            = 1
 ani / caller_number  = +12202206097
@@ -941,10 +941,10 @@ Four things worth carrying forward:
    `X-VirtualNumber`.
 2. **Twilio stamps its own `X-Twilio-CallSid`** (and `X-Twilio-AccountSid`) on
    the INVITE. Undocumented, so don't depend on it — but it means the bot gets
-   Twilio's SID for free. vjudge *cannot* inject the Call SID itself: it is
+   Twilio's SID for free. judge_it *cannot* inject the Call SID itself: it is
    minted by the same `calls.create` request that sends the INVITE, which is
-   why the injected key is vjudge's `session_id` (mapped to `call_sid`
-   vjudge-side) rather than the SID.
+   why the injected key is judge_it's `session_id` (mapped to `call_sid`
+   judge_it-side) rather than the SID.
 3. **LiveKit needs a dispatch rule, not just a trunk.** With the trunk alone it
    answers `404 Does not match Trunks or Dispatch Rules` — and Twilio reports
    only a bare `failed`/0s with **no error code, no Debugger alert and no Voice
@@ -964,24 +964,24 @@ dial true PSTN.**
 
 Now that (a) works, this is a heuristic where an exact key exists — don't build
 it for SIP runs. It remains the only option for `call_transport=pstn`, which is
-still vjudge's default, so the mechanism is documented rather than deleted.
+still judge_it's default, so the mechanism is documented rather than deleted.
 
 True PSTN (`<Dial>` to an E.164 number) cannot carry custom headers. So:
-vjudge finishes the run with `interaction_uuid = null`, and a reconciler
+judge_it finishes the run with `interaction_uuid = null`, and a reconciler
 (§7) resolves it afterwards by querying OSV:
 
 ```
 GET /api/client/{client_uuid}/interactions?virtual_id={bot_did}
-    &recipient_id={vjudge_caller_id}&started_between={t0-30s},{t1+30s}
+    &recipient_id={judge_it_caller_id}&started_between={t0-30s},{t1+30s}
 ```
 
 Exactly one match ⇒ backfill. Zero or many ⇒ leave unresolved and alert.
-Using vjudge's caller ID as `recipient_id` makes this nearly always unique,
-because only vjudge calls from that number.
+Using judge_it's caller ID as `recipient_id` makes this nearly always unique,
+because only judge_it calls from that number.
 
 **(c) Direct transport — bypass telephony entirely.**
 
-Add a non-telephony transport where vjudge talks to OSV's voice gRPC server
+Add a non-telephony transport where judge_it talks to OSV's voice gRPC server
 or text runtime directly. There, `interaction_uuid` and `is_test` are just
 request parameters — no SIP, no reconciliation, no Twilio cost, seconds
 instead of minutes. This is the mode your CI gate should use for breadth;
@@ -1013,12 +1013,12 @@ class PostInteractionMessageRequestWeb(BaseModel):
 request *looks up* an existing interaction (`views.py:531-536`); it does not create
 one with a chosen id. So:
 
-- **Turn 1:** vjudge POSTs with no `interaction_uuid`. OSV creates the interaction
+- **Turn 1:** judge_it POSTs with no `interaction_uuid`. OSV creates the interaction
   and **returns `interaction_uuid` in the response**
   (`PostInteractionMessageResponseWeb`).
-- **Turns 2..N:** vjudge passes it back to continue the conversation.
+- **Turns 2..N:** judge_it passes it back to continue the conversation.
 
-VJudge learns the real interaction uuid within a second of starting, from the
+JudgeIt learns the real interaction uuid within a second of starting, from the
 response, with **zero OSV changes and no SIP-trunk probe.** That's
 `CorrelationMethod.RESPONSE`, and it is simpler than anything proposed above.
 
@@ -1036,7 +1036,7 @@ output_message, current_module, tool_calls, function_times,
 total_response_time, interaction_metadata, interaction_uuid
 ```
 
-Over PSTN vjudge only hears audio. Here it can assert on **module transitions and
+Over PSTN judge_it only hears audio. Here it can assert on **module transitions and
 tool calls** — assertions that are impossible over voice.
 
 #### What it costs, and what it cannot test
@@ -1054,7 +1054,7 @@ gate viable.
 |---|---|
 | STT mishearing | a large class of production bugs — the bot mis-hears a DOB |
 | TTS / pronunciation | numbers, names, currency |
-| Barge-in | vjudge's entire `barge_in` feature |
+| Barge-in | judge_it's entire `barge_in` feature |
 | DTMF **collection mechanics** | digit timeouts, partial entry, RFC2833 — but see below: the *logic* is testable |
 | Turn-taking, VAD, `user_idle` | the bot hanging up on a slow caller |
 | `bot_turn_latency` | the outside-in latency metric (§6) is voice-only |
@@ -1096,7 +1096,7 @@ hand-written corpus.**
 
 **What stays voice-only:** the collection mechanics — `_digit_timeout_handler`,
 partial entry, the no-digit-when-voice-detected fallback that forwards the
-transcription instead (`dtmf.py:225-236`), RFC2833 signalling, and vjudge's own
+transcription instead (`dtmf.py:225-236`), RFC2833 signalling, and judge_it's own
 `dtmf_transport: rest` reconnect dance.
 
 **And it does not fix the in-call side-effect hazard.** Text mode executes the same
@@ -1153,7 +1153,7 @@ So:
 | `channel=VOICE` | `voice_flow_config` — the real production voice flow |
 
 **Driving a voice bot over `WEB_CHAT` tests nothing about that bot.** Different
-modules, different edges, different `general_instruction`. VJudge must always send
+modules, different edges, different `general_instruction`. JudgeIt must always send
 `channel=VOICE` when the target is a voice assistant, and treat a `None` flow as a
 hard failure rather than a fallback.
 
@@ -1166,7 +1166,7 @@ The good news: this is what OSV's own test framework already does — imposter p
 **So the one experiment worth running before anything else in this plan:** POST to
 `/text_runtime/post_message_web` with `channel=VOICE, is_test=true` against a real
 voice assistant and check that the reply comes from the voice flow (`current_module`
-should be a voice-flow module name). Ten minutes, and it decides whether vjudge's
+should be a voice-flow module name). Ten minutes, and it decides whether judge_it's
 cheap path exists today or needs an OSV endpoint.
 
 If the endpoint doesn't handle VOICE cleanly, the fallback ask is small — a thin OSV
@@ -1187,7 +1187,7 @@ out-of-scope handling. **The failures in that file are overwhelmingly reasoning
 failures, not audio failures** — which is the real argument for making text the
 default transport.
 
-### Building both transports in vjudge
+### Building both transports in judge_it
 
 > **Implementation spec: [dual-transport.md](./dual-transport.md).** That file has
 > the protocol, the exact request/response mapping, the capability matrix, the two
@@ -1202,7 +1202,7 @@ which hardcodes `MediaStreamSession`.
 #### The seam
 
 ```python
-# vjudge/transport/base.py
+# judge_it/transport/base.py
 class Transport(Protocol):
     async def start(self) -> BotTurn: ...          # place call / open interaction; returns greeting
     async def send(self, turn: CallerTurn) -> BotTurn: ...   # speech+dtmf → bot reply
@@ -1271,7 +1271,7 @@ assert:                              # text transport only; lint rejects it on s
   max_tag_only_turns:     0
 ```
 
-**Status: implemented** (2026-08-25) — `vjudge/engine/assertions.py`, wired
+**Status: implemented** (2026-08-25) — `judge_it/engine/assertions.py`, wired
 through `CallResult.passed` so a failure vetoes the LLM verdict everywhere.
 
 > The key is `assert:`, **not** `assertions:`. An earlier draft of this section
@@ -1308,14 +1308,14 @@ class CorrelationMethod(StrEnum):
 
 `SIP_HEADER` is live as of 2026-08-11 (§5a). Note it resolves in the *opposite*
 direction to what the name suggests: the join key stored on the interaction is
-vjudge's `session_id`, not an `interaction_uuid` we minted — so the run's
+judge_it's `session_id`, not an `interaction_uuid` we minted — so the run's
 `interaction_uuid` is still backfilled, just by an exact lookup on
-`interaction_metadata->>'x-vjudge-session-id'` instead of a time-window guess.
+`interaction_metadata->>'x-judge_it-session-id'` instead of a time-window guess.
 
 Store it on the run. Without it, `interaction_uuid` is a field of unknown
 trustworthiness, and six months from now nobody will remember which runs had
 a real join and which had a heuristic one. Export
-`vjudge_correlation_total{method}` — a rising `unresolved` rate is a real
+`judge_it_correlation_total{method}` — a rising `unresolved` rate is a real
 alert.
 
 ### Store the report URL
@@ -1323,7 +1323,7 @@ alert.
 OSV's imposter already does this (`app/lib/imposter/core/runner.py:246`):
 
 ```
-https://llm-studio.vjudge.dev/clients/{client_uuid}/conversations?interaction_uuid={interaction_uuid}
+https://llm-studio.judge_it.dev/clients/{client_uuid}/conversations?interaction_uuid={interaction_uuid}
 ```
 
 Put it on the run record and in the callback payload. It's the single most
@@ -1334,15 +1334,15 @@ useful field for whoever reads a failure.
 ## 6. Decision: observability that joins across both services
 
 The goal isn't "more logs." It's: given a failed run, one query returns
-vjudge's view *and* the bot's view of the same conversation.
+judge_it's view *and* the bot's view of the same conversation.
 
 ### Logging — stdout → Loki, zero files
 
-**Decision: vjudge writes no log files. Ever.** Everything goes to stdout in
+**Decision: judge_it writes no log files. Ever.** Everything goes to stdout in
 logfmt; a collector ships it to Loki. This deletes, rather than fixes:
 
 - `debug.log` per run,
-- `CallLogWriter`'s `FileHandler` attached to the shared `vjudge` logger,
+- `CallLogWriter`'s `FileHandler` attached to the shared `judge_it` logger,
 - the `_CallIdFilter` contextvar-matching filter,
 - `ENABLE_LOCAL_LOGFILE`-style local sinks.
 
@@ -1353,7 +1353,7 @@ don't, the bug class disappears — and the contextvars stay, because Loki needs
 them as *fields*.
 
 ```
-vjudge process ──stdout(logfmt)──► Grafana Alloy ──► Loki ──► Grafana Explore
+judge_it process ──stdout(logfmt)──► Grafana Alloy ──► Loki ──► Grafana Explore
     (no disk)                      (DaemonSet /                    │
                                     sidecar)                       ▼
                                                             Tempo (via trace_id
@@ -1374,7 +1374,7 @@ afterwards is a re-ingest.
 
 ```
 LABELS (bounded, ~hundreds of streams total):
-  app=vjudge  component=api|worker|media|reaper  env=dev|stage|prod
+  app=judge_it  component=api|worker|media|reaper  env=dev|stage|prod
   region=us|india|canada  level=INFO|ERROR
       ↑ that's it. Nothing per-run, per-scenario, or per-client here.
 
@@ -1391,19 +1391,19 @@ Log `scenario_hash` instead — it's 64 chars, it pins the exact payload, and
 across the fleet. If you need the payload while reading logs, the run-detail
 endpoint is one click away via `debugging_urls`.
 
-**Same Loki, separated by label.** `app="vjudge"` is the boundary. Two rules
+**Same Loki, separated by label.** `app="judge_it"` is the boundary. Two rules
 follow, and the second one is easy to miss:
 
 1. **Production dashboards must pin `app="osv-voice"`.** A query with no `app`
-   filter silently picks up vjudge's test traffic. Audit the existing panels once.
-2. **Tagging vjudge does not exclude test calls from production views.** The
-   bot-side logs of an vjudge-driven call are emitted by OSV and tagged
+   filter silently picks up judge_it's test traffic. Audit the existing panels once.
+2. **Tagging judge_it does not exclude test calls from production views.** The
+   bot-side logs of an judge_it-driven call are emitted by OSV and tagged
    `app="osv-voice"` — they look exactly like a real customer call. Separating
-   vjudge's own logs is easy; separating *test traffic* needs `is_test` to
+   judge_it's own logs is easy; separating *test traffic* needs `is_test` to
    propagate into OSV's log fields, which is the same blocker as §11.1. Worth
    knowing before assuming a label solves it.
 
-Joining still works when you want it: `{app=~"vjudge|osv-voice"} | logfmt |
+Joining still works when you want it: `{app=~"judge_it|osv-voice"} | logfmt |
 interaction_uuid="…"`. Separated by default, joinable on request.
 
 `client_uuid` is a judgement call — if you have <50 clients it *could* be a
@@ -1419,17 +1419,17 @@ names exactly where they overlap (`interaction_uuid_var`, `client_uuid_var` —
 
 ```logql
 # one conversation, both sides of the phone call
-{app=~"vjudge|osv-voice", env="prod"} | logfmt | interaction_uuid="550e8400-…"
+{app=~"judge_it|osv-voice", env="prod"} | logfmt | interaction_uuid="550e8400-…"
 
 # every error in a campaign
-{app="vjudge", component="worker", level="ERROR"} | logfmt
+{app="judge_it", component="worker", level="ERROR"} | logfmt
   | correlation_uuid="nightly-2026-08-04"
 
 # one run, in order
-{app="vjudge"} | logfmt | run_uuid="…" | line_format "{{.seq}} {{.msg}}"
+{app="judge_it"} | logfmt | run_uuid="…" | line_format "{{.seq}} {{.msg}}"
 
 # barge failures for one assistant across the fleet
-{app="vjudge"} | logfmt | assistant_uuid="…" | msg=~"barge.*(missed|late)"
+{app="judge_it"} | logfmt | assistant_uuid="…" | msg=~"barge.*(missed|late)"
 ```
 
 #### Three things files gave you for free — replace them deliberately
@@ -1443,7 +1443,7 @@ names exactly where they overlap (`interaction_uuid_var`, `client_uuid_var` —
    hard crash the last lines are lost, exactly the lines you want. Log
    terminal errors synchronously and flush before exit; register an
    `atexit`/signal flush.
-3. **"Everything in one place."** This was vjudge's best triage feature and
+3. **"Everything in one place."** This was judge_it's best triage feature and
    losing it silently would be a real regression. Replace it explicitly with
    a **run detail endpoint plus deeplinks** — see below.
 
@@ -1458,8 +1458,8 @@ block, mirroring OSV's `construct_debugging_urls`
 "debugging_urls": {
   "logs":        "https://grafana…/explore?…run_uuid%3D%22<uuid>%22",
   "trace":       "https://grafana…/explore?…traceID=<trace_id>",
-  "dashboard":   "https://grafana…/d/vjudge-run/run?var_run_uuid=<uuid>",
-  "interaction": "https://llm-studio.vjudge.dev/clients/<client>/conversations?interaction_uuid=<iuuid>",
+  "dashboard":   "https://grafana…/d/judge_it-run/run?var_run_uuid=<uuid>",
+  "interaction": "https://llm-studio.judge_it.dev/clients/<client>/conversations?interaction_uuid=<iuuid>",
   "audio":       "<presigned S3 URL>"
 }
 ```
@@ -1482,7 +1482,7 @@ change.
 
 #### Volume control (this matters at 50 concurrent calls)
 
-Loki ingest is metered and vjudge is chatty by nature.
+Loki ingest is metered and judge_it is chatty by nature.
 
 - **Never log audio frames.** Not at DEBUG, not ever. Count them into a
   metric instead.
@@ -1504,42 +1504,42 @@ None exist today. Mirror OSV's naming and **reuse
 directly comparable.
 
 ```python
-# vjudge/instruments/metrics.py
-vjudge_runs_total{client, assistant, assistant_version, scenario, outcome}
+# judge_it/instruments/metrics.py
+judge_it_runs_total{client, assistant, assistant_version, scenario, outcome}
     # outcome: passed | failed | error | timed_out | cancelled | abandoned
-vjudge_run_duration_seconds{client, assistant, scenario}
-vjudge_active_runs{client, assistant}                    # Gauge, livesum
-vjudge_queue_depth{priority}
-vjudge_admission_rejections_total{reason}
+judge_it_run_duration_seconds{client, assistant, scenario}
+judge_it_active_runs{client, assistant}                    # Gauge, livesum
+judge_it_queue_depth{priority}
+judge_it_admission_rejections_total{reason}
 
 # ── the money metric ──────────────────────────────────────────────────
-vjudge_bot_turn_latency_seconds{client, assistant, timing_source}
+judge_it_bot_turn_latency_seconds{client, assistant, timing_source}
 # Deliberately mirrors voice_runtime_user_perceived_latency_seconds.
 # Measured from the PSTN side, independently, by a different codebase.
 
-vjudge_caller_vendor_latency_seconds{vendor_type, vendor_name}  # our STT/TTS/LLM
-vjudge_vendor_errors_total{vendor_type, vendor_name, error_type, status_code}
-vjudge_llm_tokens{token_type, model, role}               # role: caller | evaluator
-vjudge_run_cost_usd{client, component}                   # component: telephony|stt|tts|llm
+judge_it_caller_vendor_latency_seconds{vendor_type, vendor_name}  # our STT/TTS/LLM
+judge_it_vendor_errors_total{vendor_type, vendor_name, error_type, status_code}
+judge_it_llm_tokens{token_type, model, role}               # role: caller | evaluator
+judge_it_run_cost_usd{client, component}                   # component: telephony|stt|tts|llm
 
-vjudge_barge_total{mode, outcome}                        # outcome: fired|missed|late
-vjudge_dtmf_total{transport, outcome}
-vjudge_evaluator_verdicts_total{passed, malformed}
-vjudge_correlation_total{method}                         # §5
-vjudge_twilio_call_status_total{status}
+judge_it_barge_total{mode, outcome}                        # outcome: fired|missed|late
+judge_it_dtmf_total{transport, outcome}
+judge_it_evaluator_verdicts_total{passed, malformed}
+judge_it_correlation_total{method}                         # §5
+judge_it_twilio_call_status_total{status}
 ```
 
-**`vjudge_bot_turn_latency_seconds` is a product feature, not just
+**`judge_it_bot_turn_latency_seconds` is a product feature, not just
 instrumentation.** OSV measures user-perceived latency from *inside* its own
-pipeline. vjudge measures it from the far end of the carrier. If OSV reports
-p95 = 1.2 s and vjudge measures 2.1 s on the same interactions, you have found
+pipeline. judge_it measures it from the far end of the carrier. If OSV reports
+p95 = 1.2 s and judge_it measures 2.1 s on the same interactions, you have found
 carrier/transport/jitter-buffer overhead that OSV structurally cannot see. Put
 both series on one Grafana panel joined on `assistant`; the gap between them
 is a number nobody currently has.
 
 Note the multiprocess gauge trap OSV already hit — the comment at
 `app/instruments/metrics.py:205-213` explains why worker-only metrics must not
-live in the shared module. Same rule applies once vjudge has api/worker/media
+live in the shared module. Same rule applies once judge_it has api/worker/media
 processes: set `PROMETHEUS_MULTIPROC_DIR`, call `mark_process_dead` on child
 exit.
 
@@ -1554,7 +1554,7 @@ Full reference in `docs/observability/tracing.md`.
                     ┌──────────────────────────────┐
                     │   TracerProvider (global)     │
 run span            │  ServiceTypeSpanProcessor ───┼──► Phoenix  (LLM payloads)
-├── turn 1          │    (llm | stt | tts)         │    project: "vjudge"
+├── turn 1          │    (llm | stt | tts)         │    project: "judge_it"
 │   ├── stt.final   │                              │
 │   ├── caller_llm ─┼─ LLM span w/ full messages   │
 │   ├── tts.ttfb    │  BatchSpanProcessor ─────────┼──► Tempo    (call path)
@@ -1568,17 +1568,17 @@ run span            │  ServiceTypeSpanProcessor ───┼──► Phoenix 
 This is what makes the two systems queryable as one. OSV's root span carries
 `client.name`, `assistant.name`, `conversation.id` (= the interaction uuid), and
 `PhoenixTracer.start_conversation_tracing()` sets them. Use **the same
-attribute names** on vjudge's root span:
+attribute names** on judge_it's root span:
 
 ```python
 conversation.id     = interaction_uuid    # ← the join key, same as OSV
 client.name         = client_name
 assistant.name      = assistant_name
 assistant.version   = assistant_version
-vjudge.run_uuid     = run_uuid
-vjudge.scenario     = scenario_name
-vjudge.scenario_hash= scenario_hash       # §2
-vjudge.profile      = profile
+judge_it.run_uuid     = run_uuid
+judge_it.scenario     = scenario_name
+judge_it.scenario_hash= scenario_hash       # §2
+judge_it.profile      = profile
 ```
 
 Then `conversation.id = "<uuid>"` in Phoenix returns **both** the bot's LLM
@@ -1586,9 +1586,9 @@ calls and the caller's LLM calls for the same conversation. That is the single
 most useful debugging view this whole document produces: the bot's reasoning
 and the adversary's reasoning, interleaved, for one call.
 
-**Separate Phoenix project, same instance.** `PHOENIX_PROJECT_NAME=vjudge`
+**Separate Phoenix project, same instance.** `PHOENIX_PROJECT_NAME=judge_it`
 alongside OSV's `voice-runtime`. Same attribute names so a filter transfers
-between them, but a hard boundary so vjudge's volume never lands in the
+between them, but a hard boundary so judge_it's volume never lands in the
 production project — a 500-call load test is ~15,000 LLM spans, which would drown
 real traffic.
 
@@ -1599,7 +1599,7 @@ with test traffic is worse than an extra click.
 
 #### Instrumentation depends on §8
 
-OSV gets automatic LLM spans from `OpenAIInstrumentor`. Whether vjudge can do
+OSV gets automatic LLM spans from `OpenAIInstrumentor`. Whether judge_it can do
 the same depends entirely on the LLM decision in §8:
 
 - **If every LLM call goes through the `openai` SDK** (the §8 recommendation —
@@ -1607,7 +1607,7 @@ the same depends entirely on the LLM decision in §8:
   `OpenAIInstrumentor` works unchanged and Phoenix spans are free. Prefer this.
 - **Until then** — the caller and evaluator run on the native Gemini client
   (`llm/gemini.py`) — auto-instrumentation gets you nothing, so emit spans by
-  hand at the LLM client boundary using OpenInference conventions. vjudge
+  hand at the LLM client boundary using OpenInference conventions. judge_it
   already captures exactly the right data: `llm_calls.json` records input,
   output, and latency for every caller and evaluator call. That capture point
   becomes the span emitter, and it stays useful afterwards for native-SDK
@@ -1625,8 +1625,8 @@ with tracer.start_as_current_span("caller_llm", attributes={
     SA.LLM_OUTPUT_MESSAGES:          response,
     SA.LLM_TOKEN_COUNT_PROMPT:       prompt_tokens,
     SA.LLM_TOKEN_COUNT_COMPLETION:   completion_tokens,
-    "vjudge.role":                   "caller",      # caller | evaluator
-    "vjudge.turn":                   turn,
+    "judge_it.role":                   "caller",      # caller | evaluator
+    "judge_it.turn":                   turn,
 }):
     ...
 ```
@@ -1638,7 +1638,7 @@ duplicate capture logic.
 
 #### Why the evaluator in Phoenix matters more than the caller
 
-Every pass/fail verdict vjudge produces comes from an LLM call whose prompt is
+Every pass/fail verdict judge_it produces comes from an LLM call whose prompt is
 a 100-line rubric. When a verdict looks wrong, you need the exact rubric, the
 exact transcript, and the exact response — which is precisely a Phoenix span.
 
@@ -1654,10 +1654,10 @@ of it. If you adopt one Phoenix feature beyond span viewing, make it this one.
   build or campaign trace.
 - **Inject `traceparent` toward the bot** where the transport allows — SIP
   header or direct mode (§5). Then OSV's pipeline spans become children of
-  vjudge's turn span: **one trace spanning both sides of the phone call**.
+  judge_it's turn span: **one trace spanning both sides of the phone call**.
   Unblocked as of 2026-08-11 for `call_transport=sip`: arbitrary `X-` headers
   demonstrably survive to the bot (§5a), so this is now just
-  `VJUDGE_SIP_EXTRA_HEADERS`-shaped work plus an OSV read of the attribute.
+  `JUDGE_IT_SIP_EXTRA_HEADERS`-shaped work plus an OSV read of the attribute.
   Still impossible over raw PSTN.
 - **`trace_id` on every log line** (see Logging above) so Loki → Tempo →
   Phoenix is a two-click pivot.
@@ -1673,7 +1673,7 @@ of it. If you adopt one Phoenix feature beyond span viewing, make it this one.
   the Phoenix exporter, which exports synchronously per span. At load-test
   concurrency (25–50 calls, each with 30 LLM spans) that's a lot of blocking
   HTTP on the hot path. Make it a knob —
-  `VJUDGE_PHOENIX_SPAN_PROCESSOR=simple|batch`, batch for load profiles, and
+  `JUDGE_IT_PHOENIX_SPAN_PROCESSOR=simple|batch`, batch for load profiles, and
   flush on shutdown so nothing is lost during drain (§7.4).
 - **Sampling.** Trace 100% of `profile: regression` runs; sample
   `profile: load-test` at 1–5%. A 500-call load test does not need 15,000 LLM
@@ -1688,11 +1688,11 @@ spans are as un-deletable as log lines.
 ### Alerts worth having on day one
 
 ```
-vjudge_runs_total{outcome="error"} rate > 10%          → harness is broken
-vjudge_correlation_total{method="unresolved"} rising   → §5 mechanism degraded
-vjudge_active_runs > 0 for > 15min with no state change → stuck run, reaper failing
-vjudge_run_cost_usd sum over 1h > budget               → runaway
-vjudge_bot_turn_latency p95 − osv p95 > 500ms          → carrier-path regression
+judge_it_runs_total{outcome="error"} rate > 10%          → harness is broken
+judge_it_correlation_total{method="unresolved"} rising   → §5 mechanism degraded
+judge_it_active_runs > 0 for > 15min with no state change → stuck run, reaper failing
+judge_it_run_cost_usd sum over 1h > budget               → runaway
+judge_it_bot_turn_latency p95 − osv p95 > 500ms          → carrier-path regression
 ```
 
 ---
@@ -1763,7 +1763,7 @@ possibly holding a production bot's concurrency slot. The reaper:
 3. hangs up anything still live,
 4. finalises the run as `abandoned` with whatever artifacts exist,
 5. attempts `interaction_uuid` reconciliation (§5b),
-6. emits `vjudge_reaped_total{state}`.
+6. emits `judge_it_reaped_total{state}`.
 
 Run it every 60 s. This is the difference between "runs for a weekend" and
 "runs for a quarter."
@@ -1805,13 +1805,13 @@ minutes each.
 
 ### 7. Cost controls
 
-vjudge spends real money per run: telephony minutes, STT/TTS seconds, LLM
+judge_it spends real money per run: telephony minutes, STT/TTS seconds, LLM
 tokens. A scenario that loops (bot keeps re-asking, caller keeps answering)
 burns until `max_turns` — and a *campaign* of those multiplies it.
 
 - Per-run and per-campaign budget caps in the config (minutes, tokens, USD).
 - Hard kill at cap, `outcome="budget_exceeded"`.
-- `vjudge_run_cost_usd{component}` and a daily-spend alert.
+- `judge_it_run_cost_usd{component}` and a daily-spend alert.
 - A global kill switch that drains and refuses new runs.
 
 ### 8. Config and code changing under a long-lived fleet
@@ -1840,7 +1840,7 @@ rather than the suite telling you at 9 a.m.
 
 ## 8. Decision: vendor plugin architecture (STT / TTS / LLM / language / transport)
 
-Today vjudge is hardwired to **Deepgram + Twilio + Gemini**. `stream.py` calls
+Today judge_it is hardwired to **Deepgram + Twilio + Gemini**. `stream.py` calls
 `DeepgramTTS` directly; STT is a Deepgram WS URL built inline; the only
 abstraction that exists is `llm/base.py`'s `LLMClient` Protocol (44 lines —
 and it's the right shape, so extend that pattern outward).
@@ -1849,18 +1849,18 @@ and it's the right shape, so extend that pattern outward).
 
 OSV supports **sarvam**, **magpie**, and **parakeet** — those exist in
 `app/runtime/voice/services/` specifically because Indic languages needed
-vendors beyond the Western defaults. vjudge supports Deepgram only.
+vendors beyond the Western defaults. judge_it supports Deepgram only.
 
-**So vjudge structurally cannot properly test the India-region bots.** A
+**So judge_it structurally cannot properly test the India-region bots.** A
 Hindi or Hinglish scenario would be transcribed by a vendor that isn't what
-production uses, which means a "failure" could be vjudge's STT mishearing the
+production uses, which means a "failure" could be judge_it's STT mishearing the
 bot rather than the bot misbehaving. That's a false-signal generator, and
 it's the strongest single argument for doing this work.
 
 ### Five protocols
 
 ```python
-# vjudge/services/protocols.py
+# judge_it/services/protocols.py
 class STTService(Protocol):
     async def stream(self, audio: AsyncIterator[bytes]) -> AsyncIterator[TranscriptEvent]: ...
 class TTSService(Protocol):
@@ -1897,9 +1897,9 @@ Look at what onboarding a vendor costs there:
 | `services/gemini.py` → `ModGoogleLLMOpenAIService(ModOpenAILLMService)` | — | **Gemini via the OpenAI path**, registered as `"GOOGLE"` |
 
 That 759-vs-34 ratio is the whole argument: **pay once for normalisation, then
-every OpenAI-compatible vendor is ~30 lines — or, for vjudge, zero lines.**
+every OpenAI-compatible vendor is ~30 lines — or, for judge_it, zero lines.**
 
-#### What vjudge should do
+#### What judge_it should do
 
 Replace `llm/base.py`'s bespoke `LLMClient` Protocol and `llm/gemini.py`'s
 native client with a single `openai.AsyncOpenAI` client whose `base_url` comes
@@ -1949,7 +1949,7 @@ routes Google through it (`ModGoogleLLMOpenAIService`). So `llm/gemini.py` (90
 lines) can go.
 
 **Verify before deleting it**, because the compat layer is historically lossy
-in exactly the places vjudge depends on:
+in exactly the places judge_it depends on:
 
 - `response_format` with a strict JSON schema — the evaluator needs this.
 - Thinking/reasoning budget for `gemini-2.5-pro`, which may only be reachable
@@ -1963,7 +1963,7 @@ the escape hatch when compat can't express what a run needs.
 
 #### Structured output belongs in the capability manifest
 
-This matters more for vjudge than for OSV, because the evaluator verdict *is*
+This matters more for judge_it than for OSV, because the evaluator verdict *is*
 the product. Today malformed JSON is a known, handled failure —
 `EvaluationResult.malformed`, a two-attempt retry, and a 90-second timeout
 (`runner.py:465-502`).
@@ -1992,7 +1992,7 @@ on. The caller role has no such constraint — it produces prose.
 Stream the caller LLM (`stream=True`, SSE deltas — uniform across
 OpenAI-compatible vendors) and pipe first tokens into TTS.
 
-This isn't about vjudge's own latency looking good. OSV's pipeline runs
+This isn't about judge_it's own latency looking good. OSV's pipeline runs
 `processors/user_idle.py`, which **ends the call if the user is idle too long**.
 A caller LLM taking 4 s to think reads to the bot as a silent human — so a slow
 caller can trip the bot's idle handler and produce a *false failure* that looks
@@ -2006,22 +2006,22 @@ enough; you still need one normalisation layer for:
 
 - `usage` missing on streamed responses unless
   `stream_options={"include_usage": true}` — and some vendors ignore it, which
-  silently breaks `vjudge_llm_tokens` and cost accounting.
+  silently breaks `judge_it_llm_tokens` and cost accounting.
 - `max_tokens` vs `max_completion_tokens`.
-- Error envelope shapes and status codes (drives `vjudge_vendor_errors_total`
+- Error envelope shapes and status codes (drives `judge_it_vendor_errors_total`
   labels and the circuit breaker).
 - Rate-limit headers — different names per vendor, needed for backpressure
   (§7.6).
 - `temperature` ranges, and whether `top_p` is honoured at all.
 - Tool-call delta framing during streaming.
 
-Write that once, in `vjudge/services/llm/openai_compat.py`, and keep
+Write that once, in `judge_it/services/llm/openai_compat.py`, and keep
 vendor-specific subclasses for genuine deviations only.
 
 #### Knock-on: Phoenix auto-instrumentation comes back
 
 This reverses the caveat in §6. If every LLM call goes through the `openai`
-SDK, **`OpenAIInstrumentor` works for vjudge too** — the same
+SDK, **`OpenAIInstrumentor` works for judge_it too** — the same
 auto-instrumentation OSV uses, no hand-emitted spans, LLM payloads in Phoenix
 for free across every vendor. The manual OpenInference span path stays only for
 native-SDK escape hatches.
@@ -2033,9 +2033,9 @@ simplify once step 3 lands. The second is fine; the spans are ~30 lines.
 
 #### Onboarding a new LLM vendor, end to end
 
-1. Store the key: `vjudge/<vendor>-llm` in AWS Secrets Manager.
+1. Store the key: `judge_it/<vendor>-llm` in AWS Secrets Manager.
 2. Insert one `providers` row: `{provider_key, vendor, service_type:'llm', base_url}`.
-3. `vjudge vendors check` — confirms the key resolves and that streaming and
+3. `judge_it vendors check` — confirms the key resolves and that streaming and
    structured output actually work; writes `capabilities` and `verified_at`.
 4. Run one scenario with `profile: latency-probe`.
 
@@ -2045,20 +2045,20 @@ No code for an OpenAI-compatible vendor. A subclass only when it deviates.
 
 Follow `ServiceFactory._class_registry[service_type][service_name]`
 (`app/runtime/voice/services/factory.py:52`), but add entry-point discovery so
-a vendor can be added **without forking vjudge**:
+a vendor can be added **without forking judge_it**:
 
 ```python
-# vjudge/services/registry.py
+# judge_it/services/registry.py
 @register("tts", "deepgram", capabilities=DEEPGRAM_TTS_CAPS)
 class DeepgramTTS: ...
 
-# third-party package, no vjudge change required:
-# pyproject.toml → [project.entry-points."vjudge.services"]
-#                  acme_tts = "acme_vjudge:AcmeTTS"
+# third-party package, no judge_it change required:
+# pyproject.toml → [project.entry-points."judge_it.services"]
+#                  acme_tts = "acme_judge_it:AcmeTTS"
 ```
 
 That's what "custom vendor support" should mean concretely: a client-specific
-or experimental vendor lives in its own package, and vjudge discovers it.
+or experimental vendor lives in its own package, and judge_it discovers it.
 
 ### Capability manifests — the part people skip
 
@@ -2085,12 +2085,12 @@ class STTCapabilities:
     sample_rates:     frozenset[int]
 ```
 
-Then `vjudge lint` fails fast with a real message — *"scenario requests
+Then `judge_it lint` fails fast with a real message — *"scenario requests
 `language: hi-IN` with `stt.name: deepgram`, which does not declare
 `code_switching`; use `sarvam` or set `strict_language: false`"* — instead of
 producing a garbage transcript and a mystifying evaluator verdict two minutes
 and one phone call later. Validating vendor capability at lint time is worth
-more here than in OSV, because vjudge's output is a *measurement*.
+more here than in OSV, because judge_it's output is a *measurement*.
 
 ### Language as a first-class axis
 
@@ -2108,7 +2108,7 @@ OSV already has the resolution logic worth copying:
 }
 ```
 
-Plus the harder cases vjudge specifically needs:
+Plus the harder cases judge_it specifically needs:
 
 - **Code-switching / Hinglish.** `language: hi-IN` with
   `secondary_languages: [en-IN]`. The caller persona should be able to switch
@@ -2123,12 +2123,12 @@ Plus the harder cases vjudge specifically needs:
   elderly-1]` expands one scenario into N runs. Cheap coverage for ASR
   robustness on the bot side.
 
-### Where providers live: OSV owns the catalog, vjudge resolves and runs
+### Where providers live: OSV owns the catalog, judge_it resolves and runs
 
 OSV already has the catalog and the UI — `RuntimeProvider`
 (`app/models/assistant.py:280`) plus `app/interface/views/runtime_providers.py`
 (CRUD, voices, language defaults, quota limits, `test-provider-api`, and
-credential registration). **VJudge builds none of that.**
+credential registration). **JudgeIt builds none of that.**
 
 Worth noting why it's reusable: `RuntimeProvider.config` isn't a blob, it's a list
 of field descriptors — `{name, type, default_value, description, range, options}`
@@ -2142,7 +2142,7 @@ user in llm-studio
       ▼
 OSV interface ── POST /v1/runs { provider_key, model, config, … }
       ▼
-vjudge API ── resolves at submit:
+judge_it API ── resolves at submit:
       │        providers table  → base_url, vendor, capabilities
       │        Secrets Manager  → api_key
       ├─► queue ─► worker ─► pipeline ─► places the call
@@ -2150,10 +2150,10 @@ vjudge API ── resolves at submit:
 OSV interface ── GET /v1/runs/{uuid} → status, verdict, debugging_urls
 ```
 
-VJudge is a pure server: accepts submissions, serves status, makes no outbound
+JudgeIt is a pure server: accepts submissions, serves status, makes no outbound
 call to OSV's control plane.
 
-#### What vjudge keeps
+#### What judge_it keeps
 
 One table, migration-seeded, ~20-40 rows:
 
@@ -2178,10 +2178,10 @@ voices, no field descriptors, no CRUD, no admin screens — `provider_key` in,
 `base_url` out.
 
 Note `quota_limit`: OSV uses its equivalent to *fall back to another vendor* under
-load. VJudge must not (see "Determinism" below) — for vjudge it caps admission.
+load. JudgeIt must not (see "Determinism" below) — for judge_it it caps admission.
 
 **`transport` and `turn_detector` aren't providers** and get no rows. They're
-payload enums validated by vjudge's Pydantic schema, and the UI renders those
+payload enums validated by judge_it's Pydantic schema, and the UI renders those
 controls from `GET /openapi.json` (§2) — which is part of why publishing the
 schema matters.
 
@@ -2194,8 +2194,8 @@ schema matters.
    never the sole record of what ran, and the key is never written into the
    payload.
 2. **Keep `provider_key` values aligned.** A key OSV's dropdown can offer but
-   vjudge has no row for means the UI presents a choice that fails at admission. A
-   CI check diffing `GET /providers/` against vjudge's rows covers it, provided
+   judge_it has no row for means the UI presents a choice that fails at admission. A
+   CI check diffing `GET /providers/` against judge_it's rows covers it, provided
    OSV's naming is stable and derivable (`{vendor}-{type}-{language}`).
 3. **A bot that won't answer is a test result, not a startup error.** If OSV's
    voice runtime is down, record `outcome="failed"` and report it. The
@@ -2204,14 +2204,14 @@ schema matters.
    scheduled runs need a submitter that isn't the UI, which is why the scenario
    registry (§2) still earns its place.
 
-#### VJudge validates OSV's catalog
+#### JudgeIt validates OSV's catalog
 
-If OSV's catalog claims `deepgram nova-2` supports `hi-IN` and it doesn't, vjudge
+If OSV's catalog claims `deepgram nova-2` supports `hi-IN` and it doesn't, judge_it
 receives that config and reports a **false bot failure**. It can't prevent that on
-the run path, but `vjudge vendors check` can verify capabilities *empirically*
+the run path, but `judge_it vendors check` can verify capabilities *empirically*
 offline and flag disagreements. A mismatch is a finding, not noise — OSV's
 production config asserts something untrue about a vendor. Emit
-`vjudge_catalog_mismatch_total{vendor, capability}`.
+`judge_it_catalog_mismatch_total{vendor, capability}`.
 
 ### Credentials: Secrets Manager, resolved never supplied
 
@@ -2219,19 +2219,19 @@ Port OSV's `app/session/secrets_manager.py` + `app/runtime/voice/utils/service_k
 — AWS Secrets Manager with a Redis read-through cache.
 
 ```
-secret name:  vjudge/{vendor}-{service_type}
-              vjudge/deepgram-stt   vjudge/groq-llm   vjudge/twilio-telephony
+secret name:  judge_it/{vendor}-{service_type}
+              judge_it/deepgram-stt   judge_it/groq-llm   judge_it/twilio-telephony
 
 resolution:   Redis cache (1h TTL) → AWS Secrets Manager → env var (DEV only)
 ```
 
-**No client dimension.** VJudge is internal tooling: one set of vendor accounts,
+**No client dimension.** JudgeIt is internal tooling: one set of vendor accounts,
 used for every run whatever client's bot is under test. That drops OSV's
 `get_client_service_keys` override chain, `supports_client_keys`, and per-client
 cost attribution.
 
 **No credential in the payload, and no pointer to one either.** The path derives
-from `(vendor, service_type)`, and `vendor` comes from vjudge's own `providers`
+from `(vendor, service_type)`, and `vendor` comes from judge_it's own `providers`
 row — not the request. Nothing to spoof. Enforce it: reject any payload field
 matching `api_key` / `token` / `secret` / `password` / `authorization` with a 422.
 New keys get registered through an admin endpoint or IaC, never a run payload.
@@ -2240,26 +2240,26 @@ New keys get registered through an admin endpoint or IaC, never a run payload.
 
 | Secret | Shape | Contents |
 |---|---|---|
-| `vjudge/twilio-telephony` | dict | `account_sid`, `auth_token`, `phone_number` |
-| `vjudge/deepgram-stt`, `-tts` | str | API key |
-| `vjudge/sarvam-stt`, `vjudge/magpie-tts` | str | API key |
-| `vjudge/google-llm`, `openai-llm`, `groq-llm` | str | API key |
-| `vjudge/livekit-transport` | dict | `api_key`, `api_secret` |
-| `vjudge/phoenix-obs` | str | `PHOENIX_API_KEY` (§6) |
+| `judge_it/twilio-telephony` | dict | `account_sid`, `auth_token`, `phone_number` |
+| `judge_it/deepgram-stt`, `-tts` | str | API key |
+| `judge_it/sarvam-stt`, `judge_it/magpie-tts` | str | API key |
+| `judge_it/google-llm`, `openai-llm`, `groq-llm` | str | API key |
+| `judge_it/livekit-transport` | dict | `api_key`, `api_secret` |
+| `judge_it/phoenix-obs` | str | `PHOENIX_API_KEY` (§6) |
 
 Store values as JSON objects even for single-key secrets — OSV's `get_key` always
 returns a dict and `service_keys` extracts `next(iter(secret.values()))`. Keeping
 that uniform is what makes the multi-resource pick work.
 
-#### Storing under `vjudge/*` is not the same as isolating
+#### Storing under `judge_it/*` is not the same as isolating
 
-The one real hazard. VJudge's caller-side STT/TTS/LLM are *vjudge's* usage, not
-the bot's — so if `vjudge/deepgram-stt` holds the same key **value** as
+The one real hazard. JudgeIt's caller-side STT/TTS/LLM are *judge_it's* usage, not
+the bot's — so if `judge_it/deepgram-stt` holds the same key **value** as
 production's, a 50-call load test consumes production's concurrency and can
 degrade real customer calls.
 
 ```
-vjudge/deepgram-stt               ─┐
+judge_it/deepgram-stt               ─┐
                                    ├─► same project ─► ONE concurrency pool
 orchestrator/default/deepgram-stt ─┘
 ```
@@ -2275,11 +2275,11 @@ obvious and the most damaging to get wrong).
   holds several keys, each read picks one, spreading load within the cache TTL.
   Directly what load tests need.
 - **Multi-key services return a dict** — Twilio and LiveKit above.
-- **Log the source, never the value**: `"[service_keys] vjudge/groq-llm: resolved
+- **Log the source, never the value**: `"[service_keys] judge_it/groq-llm: resolved
   from Secrets Manager"`. Add key-shaped strings to the redaction processors
   (§11.2) as a backstop.
 - **`invalidate_service_keys()`** for rotation — 1h TTL means rotation lands
-  within the hour; invalidate for immediate, then `vjudge vendors check`.
+  within the hour; invalidate for immediate, then `judge_it vendors check`.
 - **Changed: no env fallback in production.** OSV's is convenient locally but
   means a missing secret silently resolves to whatever is in the environment.
   Gate on `ENVIRONMENT=DEV`; in prod a missing secret is a hard failure.
@@ -2288,7 +2288,7 @@ obvious and the most damaging to get wrong).
 
 Resolve every credential the payload needs during validation, alongside the
 provider lookup — not three turns into a call when TTS 401s. Emit
-`vjudge_secret_resolution_total{source, vendor}` with source in
+`judge_it_secret_resolution_total{source, vendor}` with source in
 `cache | secrets_manager | env_fallback | not_found`; a non-zero `env_fallback` or
 `not_found` rate in prod is the alert that catches an expired key before the
 nightly suite reports 40 failures.
@@ -2297,9 +2297,9 @@ nightly suite reports 40 failures.
 ### Determinism: no silent fallback
 
 Important divergence from OSV. OSV wants vendor fallback for *resilience* — if
-Cartesia fails, use ElevenLabs, keep the call alive. **vjudge is a measuring
+Cartesia fails, use ElevenLabs, keep the call alive. **judge_it is a measuring
 instrument, and an instrument that silently changes its own calibration is
-broken.** If the configured TTS fails and vjudge quietly swaps vendors, the
+broken.** If the configured TTS fails and judge_it quietly swaps vendors, the
 latency numbers and the transcript are no longer comparable to yesterday's,
 and nobody will know why the graph moved.
 
@@ -2319,16 +2319,16 @@ So:
 
 - **Per-vendor rate limits and circuit breakers** (§7.6) keyed by vendor, not
   global. Deepgram saturating shouldn't fail Sarvam runs.
-- **`vjudge vendors check`** — a CLI/endpoint that validates every configured
+- **`judge_it vendors check`** — a CLI/endpoint that validates every configured
   vendor's credentials, lists supported languages/voices, and runs a
   ~2-second synthesise-then-transcribe loopback. Run it in CI and after every
   credential rotation. This catches "the nightly suite has been failing for
   three days because a key expired" on day zero.
-- **Generated parity matrix** — `vjudge vendors matrix --format md` emits the
+- **Generated parity matrix** — `judge_it vendors matrix --format md` emits the
   vendor × language × capability table from the manifests. Docs that can't
   drift.
-- **Metrics already account for this**: `vjudge_caller_vendor_latency_seconds`
-  and `vjudge_vendor_errors_total` (§6) carry `vendor_type` / `vendor_name`,
+- **Metrics already account for this**: `judge_it_caller_vendor_latency_seconds`
+  and `judge_it_vendor_errors_total` (§6) carry `vendor_type` / `vendor_name`,
   matching OSV's `voice_runtime_vendor_latency_seconds` labels — so
   "is Deepgram slow today" is one query across both services.
 
@@ -2336,7 +2336,7 @@ So:
 
 ## 9. Decision: storage — Postgres, and no local files at all
 
-SQLite goes away entirely (`persistence/store.py`, `vjudge.db` — 12 MB and
+SQLite goes away entirely (`persistence/store.py`, `judge_it.db` — 12 MB and
 already serialising all writes behind one asyncio lock). So does the per-run
 folder. Three destinations, chosen by data shape:
 
@@ -2468,7 +2468,7 @@ CREATE TABLE profiles (             -- named presets (§3)
     name TEXT PRIMARY KEY, body JSONB NOT NULL, updated_at TIMESTAMPTZ
 );
 
--- providers: DDL in §8 ("What vjudge keeps"). ~20-40 migration-seeded rows
+-- providers: DDL in §8 ("What judge_it keeps"). ~20-40 migration-seeded rows
 -- mapping provider_key → base_url + vendor + capabilities. No catalog copy;
 -- OSV owns the catalog and the dropdowns. Secrets live in Secrets Manager.
 
@@ -2504,12 +2504,12 @@ once. Offload bodies over ~256 KB to S3 with the row keeping the pointer.
   the intent so the API can say "expired" rather than 404.
 - **Partition `run_turns` and `run_llm_calls` by month** when they get big.
   Not on day one.
-- **Migration from `vjudge.db`:** don't. Archive the file, start clean, and
+- **Migration from `judge_it.db`:** don't. Archive the file, start clean, and
   keep a read-only script if a historical lookup is ever needed. Backfilling
   12 MB of rows that lack `client_uuid`, `assistant_uuid`, and correlation
   fields produces records that can't answer any of the new questions anyway.
 - **S3 key layout mirrors the old folder names** so triage muscle memory
-  survives: `s3://vjudge-artifacts/{region}/{client}/{assistant}/{date}/run-{run_uuid}/{bot,caller}.wav`.
+  survives: `s3://judge_it-artifacts/{region}/{client}/{assistant}/{date}/run-{run_uuid}/{bot,caller}.wav`.
 
 ---
 
@@ -2520,20 +2520,20 @@ Ordered by how much I think they're worth.
 1. **CI gate on assistant version.** `POST /v1/gates/{suite}` with
    `assistant_uuid` + `version` → runs the suite (direct transport, §5c, so
    it's fast and free) → returns pass/fail + report URL. This is what turns
-   vjudge from a diagnostic tool into a deploy gate, which is the real
+   judge_it from a diagnostic tool into a deploy gate, which is the real
    product. Pair with **version-diff**: run suite S against version N and
    N−1, report pass-rate delta per scenario.
 2. **Evaluator validation harness.** The evaluator is an unvalidated LLM judge
    that decides pass/fail. Hand-label ~50 transcripts, then measure the
    evaluator's precision/recall against those labels on every prompt change.
-   `vjudge_evaluator_agreement`. Without this you don't know your test results
+   `judge_it_evaluator_agreement`. Without this you don't know your test results
    are true. `EVALUATOR_TEMPERATURE = 0.0` (`runner.py:39`) shows you're
    already thinking about verdict stability — this is the next step.
 3. **Deterministic replay.** Already in the PRD ("Replay never touches Twilio,
    Deepgram, or the FastAPI server"). Prioritise it: it makes evaluator-prompt
    iteration free, and it's the substrate for #2.
 4. **Flake detection.** `repeats: N` on a scenario, report per-scenario flake
-   rate, `vjudge_scenario_flake_rate`. A scenario at 70% is worse than a
+   rate, `judge_it_scenario_flake_rate`. A scenario at 70% is worse than a
    scenario that fails — it teaches people to ignore red.
 5. **Phoenix experiments for evaluator iteration.** Covered in §6 — worth
    repeating here because it replaces work rather than adding it: a curated
@@ -2556,21 +2556,21 @@ Ordered by how much I think they're worth.
 Three things I'd want decided before the service mode ships, because they get
 worse with volume.
 
-### 11.1 vjudge's calls will pollute production analytics
+### 11.1 judge_it's calls will pollute production analytics
 
 `docs/core-concepts/is-test-flag.md` states plainly: *"Voice calls
 (gRPC/LiveKit) are always live."* `is_test` is settable from the imposter
 simulator, the CLI, the text runtime, and the interface API — but **not from
 an inbound voice call**.
 
-So every vjudge call into a production bot today is recorded as a **live
+So every judge_it call into a production bot today is recorded as a **live
 production interaction**: post-call processing runs, compliance checks run,
 analytics counts it, and any configured webhook or CRM write fires. At CLI
 volume that's noise. At nightly-suite volume across clients it corrupts
 reporting and may write to customer systems.
 
 **Confirmed empirically, 2026-08-11.** Interaction
-`799a39eb-d01e-4fb0-acb1-4211cf8457df` was an vjudge test call that came back
+`799a39eb-d01e-4fb0-acb1-4211cf8457df` was an judge_it test call that came back
 with `disposition = faq_due` — a *computed* post-call field, so post-call
 processing ran on it. It carried `x-is-test = 1` in its own
 `interaction_metadata` at the time. The flag is present and ignored.
@@ -2578,13 +2578,13 @@ processing ran on it. It carried `x-is-test = 1` in its own
 Fixes, in order of preference:
 
 1. **SIP header** — `X-Is-Test: 1` alongside the interaction uuid (§5a).
-   **vjudge's half is DONE**: with `VJUDGE_CALL_TRANSPORT=sip` the flag is
+   **judge_it's half is DONE**: with `JUDGE_IT_CALL_TRANSPORT=sip` the flag is
    already delivered on every call and stored as `x-is-test` on the interaction.
    What remains is only the OSV read — have the LiveKit session handler set
    `is_test=True` from that attribute. This is now the smallest of the three
    fixes, not the largest, because the transport work is already paid for.
 2. **Caller-number whitelist** — OSV has `app/interface/views/phone_whitelist.py`.
-   Register vjudge's caller IDs; voice runtime sets `is_test=True` on match.
+   Register judge_it's caller IDs; voice runtime sets `is_test=True` on match.
    Works over plain PSTN, needs no header support. Probably the pragmatic
    first move.
 3. **Dedicated test DIDs / test assistant versions** — cleanest isolation,
@@ -2597,7 +2597,7 @@ volume.
 ### 11.2 Artifacts contain unredacted PII
 
 `clients/resurgent/` scenarios collect **DOB, SSN, and ZIP** as part of the
-verification flow. vjudge records them unredacted in every destination:
+verification flow. judge_it records them unredacted in every destination:
 `run_turns.text`, `run_llm_calls` (full prompt + response),
 `runs.scenario_payload` (the persona and `vars`), the audio WAVs, the log lines,
 and — new as of §6 — **Phoenix span attributes** (`LLM_INPUT_MESSAGES` carries
@@ -2673,7 +2673,7 @@ No architecture change. Days, not weeks.
   `interaction_uuid`, `scenario_hash`, `seq`, `trace_id` as line fields (§6).
 - **Delete** `debug.log`, the `FileHandler`, `_CallIdFilter`, every local sink.
   Stand up Alloy → Loki with the bounded label set.
-- `vjudge/instruments/metrics.py` with OSV's `LATENCY_BUCKETS`; wire
+- `judge_it/instruments/metrics.py` with OSV's `LATENCY_BUCKETS`; wire
   `runs_total`, `run_duration`, `active_runs`, `llm_tokens`, `bot_turn_latency`
   from the code that already computes p50/p95.
 - Frame types + observer fanout, emitted *alongside* the existing callbacks in
@@ -2685,17 +2685,17 @@ No architecture change. Days, not weeks.
   or span ships.** Neither can be un-ingested (§11.2).
 - Add the correlation fields to the result model, nullable, unpopulated (§5).
 
-*Done when:* pasting an `interaction_uuid` into Grafana returns vjudge's and OSV's
+*Done when:* pasting an `interaction_uuid` into Grafana returns judge_it's and OSV's
 view of the same call, and Phoenix shows the caller's and the bot's LLM calls
 side by side.
 
 ### Step 2 — Stop losing state
 
 - Async SQLAlchemy + Alembic; full §9 schema in the first migration. Archive
-  `vjudge.db`, no backfill.
+  `judge_it.db`, no backfill.
 - Payload schema in `core/schema.py` (§2); semantic validation; canonical-JSON
   hashing; **sandboxed Jinja2 or `str.format`**; `extra="forbid"`.
-- `vjudge migrate-scenarios` converter; convert the corpus. Delete
+- `judge_it migrate-scenarios` converter; convert the corpus. Delete
   `scenario_loader`'s YAML path, `campaign_loader`, `detect_schema`,
   `_scenario_log_root`.
 - `CallLogWriter` contents become rows: `run_turns`, `run_evaluation`,
@@ -2714,7 +2714,7 @@ still fully readable.
   idempotency; admission control; signed callbacks; published OpenAPI.
 - `providers` table (~20-40 rows) + Secrets Manager resolution at submit, so bad
   keys and missing credentials fail at admission (§8).
-- Secrets: port `secrets_manager.py` + `service_keys.py` under `vjudge/*`, Redis
+- Secrets: port `secrets_manager.py` + `service_keys.py` under `judge_it/*`, Redis
   read-through, no client dimension, env fallback DEV-only.
 - LLM on the OpenAI schema: one `AsyncOpenAI` client, `base_url` from the
   `providers` row; delete `llm/gemini.py`, `detect_provider`, `_api_key_for`;
@@ -2730,7 +2730,7 @@ still fully readable.
 - Graceful drain; `terminationGracePeriodSeconds` above max call duration.
 - Per-vendor token buckets + circuit breakers; cost caps + kill switch.
 - Retention and S3 lifecycle rules.
-- `vjudge vendors check` in CI; capability manifests drive lint (§8).
+- `judge_it vendors check` in CI; capability manifests drive lint (§8).
 
 *Done when:* it runs for a month without anyone watching it.
 
@@ -2748,21 +2748,21 @@ still fully readable.
 - **Out-of-tree vendor plugins.** A vendor is a `providers` row; nobody has asked
   for a plugin.
 - **Flake detection, version-diff.** Real value, but only after the CI gate.
-- **Migrating `vjudge.db`.** Rows lacking `client_uuid`, `assistant_uuid`, and
+- **Migrating `judge_it.db`.** Rows lacking `client_uuid`, `assistant_uuid`, and
   correlation fields can't answer any of the new questions.
 
 ### Cross-team work, runs in parallel from day one
 
-None of this is vjudge code, and all of it has lead time:
+None of this is judge_it code, and all of it has lead time:
 
-- Confirm vjudge's vendor keys are quota-isolated from production (Twilio first).
+- Confirm judge_it's vendor keys are quota-isolated from production (Twilio first).
 - `is_test` for voice calls — OSV change or caller-ID whitelist. **Now the only
   item on this list still blocked on another team**, and more urgent than when
-  it was written: vjudge already *delivers* `x-is-test=1` to the bot over SIP
+  it was written: judge_it already *delivers* `x-is-test=1` to the bot over SIP
   and it is stored on the interaction, but nothing consumes it, so test calls
   are still recorded as live production interactions with computed dispositions.
 - ~~`interaction_uuid` injection — OSV change plus a SIP-trunk probe.~~ **Done
-  2026-08-11, vjudge-side only** — the probe passed and no OSV change was
+  2026-08-11, judge_it-side only** — the probe passed and no OSV change was
   needed (§5a).
 
 ---
@@ -2778,20 +2778,20 @@ Grouped by who can answer them. Nothing here blocks step 1.
    Small change, crosses a team boundary. (§5, §11.1)
 2. **Will OSV take the capability fields** (`interim_results`, `code_switching`,
    `structured_output`, …) into `RuntimeProvider`? If yes there's one source of
-   truth and vjudge's overlay disappears — and OSV needs the same facts anyway,
+   truth and judge_it's overlay disappears — and OSV needs the same facts anyway,
    for barge timing and its own structured LLM calls. (§8)
 3. **Is OSV's `provider_key` naming stable and derivable** (`{vendor}-{type}-{language}`)?
-   A CI diff against `GET /providers/` keeps vjudge's rows aligned, but only if
+   A CI diff against `GET /providers/` keeps judge_it's rows aligned, but only if
    the keys are predictable. (§8)
 
 ### Needs infra / ops (4)
 
-4. **Are vjudge's vendor keys production's keys under a different path?**
+4. **Are judge_it's vendor keys production's keys under a different path?**
    Diff the values. Check Twilio first. If shared, provisioning separate accounts
    blocks any load testing. (§8)
-5. **Decided:** same Loki tagged `app="vjudge"`, separate Phoenix *project*,
+5. **Decided:** same Loki tagged `app="judge_it"`, separate Phoenix *project*,
    isolated Postgres (§6, §9). What's left to confirm: can the existing Phoenix
-   instance take vjudge's span volume, and do current production Grafana panels
+   instance take judge_it's span volume, and do current production Grafana panels
    pin `app=` — if not they'll start including test traffic.
 6. **Is there already an Alloy/promtail DaemonSet** in these clusters, or does log
    shipping need provisioning? Changes step 1's size. (§6)
@@ -2801,10 +2801,10 @@ Grouped by who can answer them. Nothing here blocks step 1.
 ### Needs a decision from you (4)
 
 8. **Who edits scenarios** once they're payloads? "Engineers with curl" →
-   `vjudge push` from a git directory. "QA or client-success" → a screen in
+   `judge_it push` from a git directory. "QA or client-success" → a screen in
    `llm-studio-frontend`. Decide before the YAML is gone, not after. (§2)
 9. **Who submits scheduled runs?** If OSV's UI is the only caller, an interface
-   outage silently skips the nightly suite. VJudge's own scheduler is more robust
+   outage silently skips the nightly suite. JudgeIt's own scheduler is more robust
    for a canary. (§8)
 10. **Which vendors beyond Deepgram, in priority order?** Sarvam and Magpie unblock
     India; mirror what the India-region bots actually run in production, not a

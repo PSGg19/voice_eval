@@ -1,11 +1,11 @@
 # Architecture
 
-High-level layout of the `vjudge` package post-Task-9 restructure.
+High-level layout of the `judge_it` package post-Task-9 restructure.
 
 ## Layering
 
 ```
-vjudge/
+judge_it/
 ├── cli/            # Typer subcommand handlers; thin wrappers over orchestrator + core
 ├── core/           # Models, scenario loader, lint, settings — no I/O dependencies
 ├── engine/         # AI caller, evaluator, barge triggers; pure logic over transcripts
@@ -25,7 +25,7 @@ cli  →  orchestrator  →  engine, transport, persistence, llm, bcg
                                     └→  core
 ```
 
-`core` has no deps on other vjudge subpackages.
+`core` has no deps on other judge_it subpackages.
 `legacy` is leaf — nothing imports from it except `orchestrator/runner.py` for
 the V1 dispatch path.
 
@@ -34,7 +34,7 @@ the V1 dispatch path.
 Tiered to match cadence:
 
 ```
-tests/unit/         # fast, no I/O; mirrors vjudge/<subpackage>/ structure
+tests/unit/         # fast, no I/O; mirrors judge_it/<subpackage>/ structure
 tests/integration/  # runner-level tests with stubbed transport / LLM
 tests/e2e/          # live Twilio + LLM calls behind RUN_LIVE=1
 ```

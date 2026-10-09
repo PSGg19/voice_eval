@@ -15,11 +15,11 @@ import logging
 
 import pytest
 
-from vjudge.connectors.logs import _JsonFormatter
-from vjudge.core.log_context import call_id_var
-from vjudge.core.models import Campaign, CallResult, CallStatus, Scenario
-from vjudge.orchestrator.campaign_runner import CampaignRunner
-from vjudge.persistence.logwriter import CallLogWriter
+from judge_it.connectors.logs import _JsonFormatter
+from judge_it.core.log_context import call_id_var
+from judge_it.core.models import Campaign, CallResult, CallStatus, Scenario
+from judge_it.orchestrator.campaign_runner import CampaignRunner
+from judge_it.persistence.logwriter import CallLogWriter
 
 
 def _scenario(name: str = "one-stream") -> Scenario:
@@ -57,7 +57,7 @@ def test_single_run_mode_still_captures_a_per_run_file(tmp_path):
         assert len(root.handlers) == len(before) + 1
         token = call_id_var.set("d" * 32)
         try:
-            src = logging.getLogger("vjudge.test.p15")
+            src = logging.getLogger("judge_it.test.p15")
             src.setLevel(logging.INFO)     # root defaults to WARNING in tests
             src.info("hello single-run")
         finally:
@@ -110,7 +110,7 @@ async def test_20_concurrent_runs_share_one_stream_without_corruption():
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
     handler.setFormatter(_JsonFormatter())     # the LOG_SINK=json formatter
-    stream_logger = logging.getLogger("vjudge.test.p15.stream")
+    stream_logger = logging.getLogger("judge_it.test.p15.stream")
     stream_logger.setLevel(logging.INFO)
     stream_logger.propagate = False            # keep test output clean
     stream_logger.addHandler(handler)

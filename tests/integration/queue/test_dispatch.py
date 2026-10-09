@@ -16,9 +16,9 @@ from fakeredis import aioredis as fakeaioredis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vjudge.db.models import Run, RunBatch
-from vjudge.queue.dispatch import QueueExecutor, redispatch_stuck
-from vjudge.queue.streams import StageQueue
+from judge_it.db.models import Run, RunBatch
+from judge_it.queue.dispatch import QueueExecutor, redispatch_stuck
+from judge_it.queue.streams import StageQueue
 
 
 @pytest_asyncio.fixture

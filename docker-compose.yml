@@ -2,9 +2,9 @@
 #
 # Postgres is the database and is NOT optional — but on this machine it is the
 # NATIVE server (Homebrew, port 5432, shared with the local OSV stack), not a
-# container, so the developer's existing SQL tooling sees vjudge's data with
-# zero extra setup. The app connects via VJUDGE_DATABASE_URL (default
-# postgres:root@localhost:5432/vjudge) and owns ONLY the `vjudge` database
+# container, so the developer's existing SQL tooling sees judge_it's data with
+# zero extra setup. The app connects via JUDGE_IT_DATABASE_URL (default
+# postgres:root@localhost:5432/judge_it) and owns ONLY the `judge_it` database
 # there. The `postgres` service below is internal plumbing for the tracing
 # profile (Phoenix/Langfuse need their own store and must not write into the
 # OSV server); it exposes no host port.
@@ -29,7 +29,7 @@
 # that switch is a config change and not a migration, and so the S3 path can be
 # exercised locally before it matters.
 
-name: vjudge
+name: judge_it
 
 services:
   # ----------------------------------------------- tracing-internal postgres
@@ -41,12 +41,12 @@ services:
     image: postgres:16-alpine
     profiles: ["tracing", "all"]
     environment:
-      POSTGRES_USER: vjudge
-      POSTGRES_PASSWORD: vjudge
-      POSTGRES_DB: vjudge
+      POSTGRES_USER: judge_it
+      POSTGRES_PASSWORD: judge_it
+      POSTGRES_DB: judge_it
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vjudge -d vjudge"]
+      test: ["CMD-SHELL", "pg_isready -U judge_it -d judge_it"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -60,11 +60,11 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     environment:
-      PGPASSWORD: vjudge
+      PGPASSWORD: judge_it
     entrypoint: >
       /bin/sh -c "
-      psql -h postgres -U vjudge -d vjudge -tc \"SELECT 1 FROM pg_database WHERE datname='phoenix'\" | grep -q 1 || psql -h postgres -U vjudge -d vjudge -c 'CREATE DATABASE phoenix' &&
-      psql -h postgres -U vjudge -d vjudge -tc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U vjudge -d vjudge -c 'CREATE DATABASE langfuse' &&
+      psql -h postgres -U judge_it -d judge_it -tc \"SELECT 1 FROM pg_database WHERE datname='phoenix'\" | grep -q 1 || psql -h postgres -U judge_it -d judge_it -c 'CREATE DATABASE phoenix' &&
+      psql -h postgres -U judge_it -d judge_it -tc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U judge_it -d judge_it -c 'CREATE DATABASE langfuse' &&
       echo 'databases ready: phoenix, langfuse'
       "
 
@@ -92,7 +92,7 @@ services:
     environment:
       # SQLite is Phoenix's default and serialises writes; point it at Postgres
       # so local traces survive a restart and can take a burst.
-      PHOENIX_SQL_DATABASE_URL: postgresql://vjudge:vjudge@postgres:5432/phoenix
+      PHOENIX_SQL_DATABASE_URL: postgresql://judge_it:judge_it@postgres:5432/phoenix
     depends_on:
       postgres-init: {condition: service_completed_successfully}
 
@@ -121,7 +121,7 @@ services:
     # 3000. LANGFUSE_HOST must match (see .env.local.example).
     ports: ["3200:3000"]
     environment: &langfuse-env
-      DATABASE_URL: postgresql://vjudge:vjudge@postgres:5432/langfuse
+      DATABASE_URL: postgresql://judge_it:judge_it@postgres:5432/langfuse
       NEXTAUTH_SECRET: local-dev-only-not-a-secret
       SALT: local-dev-only-not-a-secret
       # Local-dev constant, deliberately committed — encrypts nothing that
@@ -137,21 +137,21 @@ services:
       REDIS_CONNECTION_STRING: redis://redis:6379
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
       LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: vjudge
-      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: vjudge-local-only
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: judge_it
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: judge_it-local-only
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       # First-boot provisioning: org, project and API keys exist without any
       # manual signup. These are the keys .env.local.example references.
-      LANGFUSE_INIT_ORG_ID: vjudge
-      LANGFUSE_INIT_ORG_NAME: VJudge
-      LANGFUSE_INIT_PROJECT_ID: vjudge-local
-      LANGFUSE_INIT_PROJECT_NAME: vjudge-local
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-vjudge-local
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-vjudge-local
+      LANGFUSE_INIT_ORG_ID: judge_it
+      LANGFUSE_INIT_ORG_NAME: JudgeIt
+      LANGFUSE_INIT_PROJECT_ID: judge_it-local
+      LANGFUSE_INIT_PROJECT_NAME: judge_it-local
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-judge_it-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-judge_it-local
       LANGFUSE_INIT_USER_EMAIL: dev@local.test
       LANGFUSE_INIT_USER_NAME: dev
-      LANGFUSE_INIT_USER_PASSWORD: vjudge-local
+      LANGFUSE_INIT_USER_PASSWORD: judge_it-local
     depends_on:
       postgres-init: {condition: service_completed_successfully}
       clickhouse: {condition: service_healthy}
@@ -193,8 +193,8 @@ services:
     profiles: ["storage", "tracing", "all"]
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: vjudge
-      MINIO_ROOT_PASSWORD: vjudge-local-only
+      MINIO_ROOT_USER: judge_it
+      MINIO_ROOT_PASSWORD: judge_it-local-only
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # console
@@ -214,10 +214,10 @@ services:
       minio: {condition: service_healthy}
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 vjudge vjudge-local-only &&
-      mc mb --ignore-existing local/vjudge-artifacts &&
+      mc alias set local http://minio:9000 judge_it judge_it-local-only &&
+      mc mb --ignore-existing local/judge_it-artifacts &&
       mc mb --ignore-existing local/langfuse &&
-      echo 'buckets ready: vjudge-artifacts, langfuse'
+      echo 'buckets ready: judge_it-artifacts, langfuse'
       "
 
 volumes:

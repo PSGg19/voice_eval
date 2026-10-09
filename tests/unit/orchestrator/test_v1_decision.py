@@ -1,7 +1,7 @@
 """P2.6 — the legacy V1 decision, pinned so it is decided, not rediscovered.
 
-Decision: the sync FlowEngine is RETAINED AND FROZEN for `vjudge load` /
-`vjudge watch`; a V1 `steps:` file run conversationally still works but warns
+Decision: the sync FlowEngine is RETAINED AND FROZEN for `judge_it load` /
+`judge_it watch`; a V1 `steps:` file run conversationally still works but warns
 that it is deprecated. FlowEngine never learns frames.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-from vjudge.orchestrator.runner import TestRunner, detect_schema
+from judge_it.orchestrator.runner import TestRunner, detect_schema
 
 
 V1_FLOW = """
@@ -42,7 +42,7 @@ async def test_v1_conversational_run_warns_deprecated(tmp_path, caplog, monkeypa
         return "ran-v1"
 
     monkeypatch.setattr(runner, "run_flow_file", fake_run_flow_file)
-    with caplog.at_level(logging.WARNING, logger="vjudge.orchestrator.runner"):
+    with caplog.at_level(logging.WARNING, logger="judge_it.orchestrator.runner"):
         result = await runner.run_scenario_file(p)
 
     assert result == "ran-v1"                      # V1 still runs (the shim)
@@ -57,9 +57,9 @@ def test_flow_engine_has_not_learned_frames():
     import sys
 
     code = (
-        "import sys; import vjudge.legacy.flow; "
+        "import sys; import judge_it.legacy.flow; "
         "bad = [m for m in sys.modules if m in "
-        "('vjudge.frames', 'vjudge.engine.conversation')]; "
+        "('judge_it.frames', 'judge_it.engine.conversation')]; "
         "assert not bad, f'legacy FlowEngine now imports {bad}'"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

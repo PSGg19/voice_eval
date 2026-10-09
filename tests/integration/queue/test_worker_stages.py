@@ -15,16 +15,16 @@ from fakeredis import aioredis as fakeaioredis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vjudge.core.models import (
+from judge_it.core.models import (
     CallResult,
     CallStatus,
     EvaluationResult,
     TranscriptEntry,
 )
-from vjudge.db.models import Run, Scenario as ScenarioRow
-from vjudge.queue.leases import LeaseManager
-from vjudge.queue.streams import StageQueue
-from vjudge.queue.worker import StageWorker, sampled_in
+from judge_it.db.models import Run, Scenario as ScenarioRow
+from judge_it.queue.leases import LeaseManager
+from judge_it.queue.streams import StageQueue
+from judge_it.queue.worker import StageWorker, sampled_in
 
 
 SCENARIO_BODY = {
@@ -233,7 +233,7 @@ async def test_budget_exhausted_defers_without_burning_an_attempt(
 ):
     """P4.4: no slot → the entry is re-queued with the SAME attempt after the
     lease is released, and the row is untouched."""
-    from vjudge.queue.admission import CONFIG_HASH, ExecutionBudget
+    from judge_it.queue.admission import CONFIG_HASH, ExecutionBudget
 
     run_uuid = seed_run(migrated_engine)
     created = get_run(migrated_engine, run_uuid).created_at

@@ -16,9 +16,9 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from vjudge.db.models import Run
-from vjudge.queue.leases import LEASE_HISTORY
-from vjudge.queue.streams import StageQueue, connect
+from judge_it.db.models import Run
+from judge_it.queue.leases import LEASE_HISTORY
+from judge_it.queue.streams import StageQueue, connect
 
 from tests.distributed.conftest import (
     REDIS_URL,
@@ -88,7 +88,7 @@ def stop(*procs, sig=signal.SIGTERM, timeout=15):
 def test_200_runs_complete_exactly_once_across_two_workers(
     dist_engine, dist_redis, clean_runs
 ):
-    dist_redis.hset("vjudge:admission:config",
+    dist_redis.hset("judge_it:admission:config",
                     "per_assistant_max_concurrency", "64")
     rows = seed_runs(dist_engine, 200, name_prefix="p1")
     dispatch_all(rows)
@@ -116,7 +116,7 @@ def test_200_runs_complete_exactly_once_across_two_workers(
 def test_kill9_mid_run_is_recovered_by_the_survivor(
     dist_engine, dist_redis, clean_runs
 ):
-    dist_redis.hset("vjudge:admission:config",
+    dist_redis.hset("judge_it:admission:config",
                     "per_assistant_max_concurrency", "64")
     rows = seed_runs(dist_engine, 80, name_prefix="p2")
     dispatch_all(rows)
@@ -147,7 +147,7 @@ def test_kill9_mid_run_is_recovered_by_the_survivor(
 def test_per_assistant_budget_of_2_holds_across_workers(
     dist_engine, dist_redis, clean_runs
 ):
-    dist_redis.hset("vjudge:admission:config",
+    dist_redis.hset("judge_it:admission:config",
                     "per_assistant_max_concurrency", "2")
     target = "+15550002222"
     rows = seed_runs(dist_engine, 24, target=target, name_prefix="p3")
@@ -170,7 +170,7 @@ def test_per_assistant_budget_of_2_holds_across_workers(
 def test_sigterm_drains_within_deadline_zero_lost_zero_duplicated(
     dist_engine, dist_redis, clean_runs
 ):
-    dist_redis.hset("vjudge:admission:config",
+    dist_redis.hset("judge_it:admission:config",
                     "per_assistant_max_concurrency", "64")
     rows = seed_runs(dist_engine, 50, name_prefix="p4")
     dispatch_all(rows)
@@ -201,7 +201,7 @@ def test_sigterm_drains_within_deadline_zero_lost_zero_duplicated(
 def test_interactive_run_starts_within_5s_during_a_batch_flood(
     dist_engine, dist_redis, clean_runs
 ):
-    dist_redis.hset("vjudge:admission:config",
+    dist_redis.hset("judge_it:admission:config",
                     "per_assistant_max_concurrency", "50")
     flood = seed_runs(dist_engine, 60, target="+15550003333", name_prefix="p5b")
     dispatch_all(flood, lane="batch")
@@ -239,7 +239,7 @@ def test_kill_switch_halts_admissions_within_one_cycle(
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from vjudge.api import install_v3
+    from judge_it.api import install_v3
     from tests.integration.api.conftest import make_settings
 
     settings = make_settings(
@@ -264,7 +264,7 @@ def test_kill_switch_halts_admissions_within_one_cycle(
     ok = client.post("/v1/runs", json={"scenario_id": scenario_id, "region": "us"})
     assert ok.status_code == 201, ok.text            # gate open → admitted
 
-    dist_redis.hset("vjudge:admission:config", "kill_switch", "1")
+    dist_redis.hset("judge_it:admission:config", "kill_switch", "1")
     time.sleep(1.1)                                   # one config cycle
 
     refused = client.post("/v1/runs", json={"scenario_id": scenario_id, "region": "us"})
@@ -272,7 +272,7 @@ def test_kill_switch_halts_admissions_within_one_cycle(
     assert refused.json()["detail"]["error_type"] == "admission_refused"
 
     # …and flips back off within a cycle too — no restart anywhere.
-    dist_redis.hset("vjudge:admission:config", "kill_switch", "0")
+    dist_redis.hset("judge_it:admission:config", "kill_switch", "0")
     time.sleep(1.1)
     again = client.post("/v1/runs", json={"scenario_id": scenario_id, "region": "us"})
     assert again.status_code == 201, again.text

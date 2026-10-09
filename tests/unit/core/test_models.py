@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vjudge.core.models import (
+from judge_it.core.models import (
     CallResult,
     CallStatus,
     EvaluationCriterion,

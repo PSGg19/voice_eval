@@ -1,4 +1,4 @@
-"""Unit tests for `vjudge.transport.sip` — SIP URI construction.
+"""Unit tests for `judge_it.transport.sip` — SIP URI construction.
 
 Everything here is pure: no Twilio client, no network. The URI these
 functions render is the entire contract with Twilio's outbound SIP
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from vjudge.transport.sip import (
+from judge_it.transport.sip import (
     SIP_HEADER_BUDGET,
     build_sip_uri,
     encode_header_value,
@@ -32,20 +32,20 @@ def test_build_uri_bare():
     assert build_sip_uri(user=TRUNK, host=LIVEKIT_HOST) == f"sip:1205@{LIVEKIT_HOST}"
 
 
-def test_build_uri_canonical_shape_vjudge_dials():
+def test_build_uri_canonical_shape_judge_it_dials():
     """Trunk id in the user part, bot number in X-VirtualNumber."""
     uri = build_sip_uri(
         user=TRUNK,
         host=LIVEKIT_HOST,
         headers={
             "X-VirtualNumber": "+18447331982",
-            "X-VJudge-Session-Id": "sess-xyz",
+            "X-JudgeIt-Session-Id": "sess-xyz",
             "X-Is-Test": "1",
         },
     )
     assert uri == (
         f"sip:1205@{LIVEKIT_HOST}"
-        "?X-Is-Test=1&X-VJudge-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
+        "?X-Is-Test=1&X-JudgeIt-Session-Id=sess-xyz&X-VirtualNumber=%2B18447331982"
     )
 
 
@@ -105,7 +105,7 @@ def test_validate_trunk_number_accepts_livekit_identifier():
 
 
 def test_validate_trunk_number_empty_names_the_env_var():
-    with pytest.raises(ValueError, match="VJUDGE_SIP_TRUNK_NUMBER"):
+    with pytest.raises(ValueError, match="JUDGE_IT_SIP_TRUNK_NUMBER"):
         validate_trunk_number("")
 
 
@@ -169,7 +169,7 @@ def test_validate_host_accepts_hostname_and_port():
 
 
 def test_validate_host_empty_names_the_env_var():
-    with pytest.raises(ValueError, match="VJUDGE_SIP_DESTINATION_HOST"):
+    with pytest.raises(ValueError, match="JUDGE_IT_SIP_DESTINATION_HOST"):
         validate_sip_host("")
 
 
@@ -193,11 +193,11 @@ def test_validate_host_rejects_scheme_userinfo_params_spaces(bad_host):
 
 
 def test_validate_header_name_accepts_x_prefixed():
-    validate_header_name("X-VJudge-Session-Id")
+    validate_header_name("X-JudgeIt-Session-Id")
     validate_header_name("X-Is-Test")
 
 
-@pytest.mark.parametrize("bad", ["", "Session-Id", "x_vjudge", "X-", "X VJudge"])
+@pytest.mark.parametrize("bad", ["", "Session-Id", "x_judge_it", "X-", "X JudgeIt"])
 def test_validate_header_name_rejects_others(bad):
     with pytest.raises(ValueError):
         validate_header_name(bad)

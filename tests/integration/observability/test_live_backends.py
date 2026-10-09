@@ -18,7 +18,7 @@ import pytest
 PHOENIX = "http://localhost:6006"
 LANGFUSE = "http://localhost:3200"
 LOKI = "http://localhost:3100"
-LF_AUTH = ("pk-lf-vjudge-local", "sk-lf-vjudge-local")
+LF_AUTH = ("pk-lf-judge_it-local", "sk-lf-judge_it-local")
 
 
 def _reachable(url: str) -> bool:
@@ -44,8 +44,8 @@ def test_one_run_is_one_trace_in_phoenix_and_langfuse(monkeypatch):
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", LF_AUTH[1])
     monkeypatch.delenv("TRACE_SAMPLE_RATE", raising=False)
 
-    from vjudge.observers import build_observers, emit, run_dispatcher
-    from vjudge.observers.events import (
+    from judge_it.observers import build_observers, emit, run_dispatcher
+    from judge_it.observers.events import (
         BotTurn, CallerTurn, Generation, RunFinished, RunStarted,
     )
 
@@ -99,13 +99,13 @@ def test_log_line_lands_in_loki_with_run_id_as_field(monkeypatch):
     monkeypatch.setenv("LOG_SINK", "loki")
     monkeypatch.setenv("LOKI_URL", f"{LOKI}/loki/api/v1/push")
 
-    from vjudge.connectors.logs import build
-    from vjudge.core.log_context import call_id_var
+    from judge_it.connectors.logs import build
+    from judge_it.core.log_context import call_id_var
 
     marker = f"p5-loki-{uuid.uuid4().hex[:10]}"
     handler = build()
     assert type(handler).__name__ == "LokiQueueHandler"
-    lg = logging.getLogger("vjudge.p5test")
+    lg = logging.getLogger("judge_it.p5test")
     lg.setLevel(logging.INFO)
     lg.addHandler(handler)
     token = call_id_var.set(marker)
@@ -116,7 +116,7 @@ def test_log_line_lands_in_loki_with_run_id_as_field(monkeypatch):
         lg.removeHandler(handler)
 
     found = None
-    query = {"query": '{service="vjudge"}',
+    query = {"query": '{service="judge_it"}',
              "start": str((time.time_ns()) - 120 * 10**9)}
     for _ in range(15):
         r = httpx.get(f"{LOKI}/loki/api/v1/query_range", params=query, timeout=10)

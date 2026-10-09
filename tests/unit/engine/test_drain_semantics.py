@@ -13,17 +13,17 @@ import time
 
 import pytest
 
-from vjudge.core.models import Scenario
-from vjudge.engine.caller import AICallerEngine
-from vjudge.engine.conversation import ConversationEngine, Termination
-from vjudge.frames import (
+from judge_it.core.models import Scenario
+from judge_it.engine.caller import AICallerEngine
+from judge_it.engine.conversation import ConversationEngine, Termination
+from judge_it.frames import (
     BotFinalSpeech,
     BotTurnEnded,
     CallerSpeech,
     ControlCancelled,
     ControlStarted,
 )
-from vjudge.llm.base import LLMResult
+from judge_it.llm.base import LLMResult
 
 
 def make_scenario() -> Scenario:

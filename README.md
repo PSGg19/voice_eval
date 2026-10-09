@@ -1,95 +1,66 @@
-# V-Judge 🎯
+# judge-it ⚖️
 
-> **Autonomous AI Voice Agent & Conversational LLM Evaluation Engine**
+> **Autonomous AI Voice Agent & Conversational LLM Evaluation Framework**
 
-V-Judge is an enterprise-grade framework for continuous evaluation, benchmarking, and automated testing of AI voice bots and LLM agents. It simulates human-like turn-taking, barge-in scenarios, DTMF signalling, latency analysis, and multi-turn conversational quality assessment.
-
----
-
-## 🌟 Key Features
-
-- **🎙️ Real-time Voice & Telephony Transport**: Full support for Twilio Media Streams, LiveKit SIP, and WebSockets.
-- **⚡ Simulated Human Interaction**: Interactive multi-turn dialogs with configurable persona, barge-in (scheduled & LLM-triggered), and DTMF tone injection.
-- **📊 Observability & Quality Metrics**: Turn-by-turn latency metrics, STT/TTS fidelity scoring, LLM judge evaluation, and Phoenix/Langfuse/Prometheus integration.
-- **🚀 Scale & Load Testing**: Concurrency controls, worker-owned dialing, distributed test suites, and load profiling.
-- **🛠️ Extensible CLI**: Rich CLI for running scenarios, linting flows, generation (`vjudge run`, `vjudge lint`, `vjudge bcg`).
+`judge-it` is a high-performance evaluation engine designed for continuous benchmarking, quality scoring, and load testing of AI voice bots, conversational agents, and LLM pipelines.
 
 ---
 
-## 🏗️ Architecture Overview
+## ✨ Features
+
+- **🎙️ Telephony & Real-time Voice Transport**: Support for WebSockets, Twilio Media Streams, and LiveKit SIP trunks.
+- **🗣️ Human-like Turn Simulation**: Multi-turn conversation orchestration with configurable LLM persona, barge-in detection, and DTMF signalling.
+- **📈 Comprehensive Observability**: Latency profiling (P50/P95/P99), turn-by-turn STT/TTS fidelity scoring, LLM judge evaluation, and OpenTelemetry / Phoenix integration.
+- **⚡ Concurrency & Load Profiling**: Worker-owned dialing, distributed runner lanes, and rate-limited load generation.
+- **💻 Command-Line Suite**: Comprehensive CLI for running evaluation flows (`judge-it run`), linting scenario definitions (`judge-it lint`), and benchmark scenario generation (`judge-it bcg`).
+
+---
+
+## 🏗️ Architecture
 
 ```
-                        ┌───────────────────────────────┐
-                        │          V-Judge CLI          │
-                        └──────────────┬────────────────┘
-                                       │
-                        ┌──────────────▼────────────────┐
-                        │      Scenario & Flow Engine   │
-                        └──────────────┬────────────────┘
-                                       │
-            ┌──────────────────────────┼──────────────────────────┐
-            │                          │                          │
-  ┌─────────▼─────────┐      ┌─────────▼─────────┐      ┌─────────▼─────────┐
-  │   Twilio / SIP    │      │    VAD / STT      │      │    LLM Evaluator  │
-  │    Transports     │      │   Interactions    │      │    Judge System   │
-  └───────────────────┘      └───────────────────┘      └───────────────────┘
+                       ┌───────────────────────────────┐
+                       │          judge-it CLI         │
+                       └──────────────┬────────────────┘
+                                      │
+                       ┌──────────────▼────────────────┐
+                       │    Scenario & Flow Engine     │
+                       └──────────────┬────────────────┘
+                                      │
+           ┌──────────────────────────┼──────────────────────────┐
+           │                          │                          │
+ ┌─────────▼─────────┐      ┌─────────▼─────────┐      ┌─────────▼─────────┐
+ │   Twilio / SIP    │      │    VAD / STT      │      │    LLM Evaluator  │
+ │    Transports     │      │   Interactions    │      │    Judge System   │
+ └───────────────────┘      └───────────────────┘      └───────────────────┘
 ```
 
 ---
 
-## 🚦 Quick Start
+## 🚀 Quick Start
 
 ### 1. Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/PSGg19/V-judge.git
-cd V-judge
+git clone https://github.com/PSGg19/judge-it.git
+cd judge-it
 
-# Create virtual environment & install dependencies
+# Set up virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
 
-### 2. Configuration
-
-Copy the example environment file:
-```bash
-cp .env.example .env
-```
-Edit `.env` to configure your LLM providers (e.g. `GEMINI_API_KEY`, `OPENAI_API_KEY`), database, and transport settings.
-
-### 3. Run a Scenario
+### 2. Usage
 
 ```bash
-# Validate scenario YAML syntax
-vjudge lint clients/_examples/happy-path.yaml
+# Lint a scenario YAML flow
+judge-it lint clients/_examples/happy-path.yaml
 
-# Execute test scenario
-vjudge run clients/_examples/happy-path.yaml
+# Run evaluation scenario
+judge-it run clients/_examples/happy-path.yaml
 ```
-
----
-
-## 📜 CLI Reference
-
-| Command | Description |
-| :--- | :--- |
-| `vjudge run <scenario.yaml>` | Execute an AI voice evaluation scenario |
-| `vjudge lint <scenario.yaml>` | Validate scenario structure and syntax |
-| `vjudge bcg` | Benchmark Scenario Generator CLI |
-| `vjudge serve` | Start local API & web dashboard server |
-| `vjudge load` | Execute concurrent load testing |
-
----
-
-## 📊 Observability & Metrics
-
-V-Judge integrates natively with:
-- **Phoenix & Langfuse**: Trace conversation turns and LLM evaluation prompts.
-- **Prometheus & Grafana**: Monitor call density, turn latencies (P50/P95/P99), and error rates.
-- **SQLite / PostgreSQL**: Store structured run results, audio recordings, and transcripts.
 
 ---
 

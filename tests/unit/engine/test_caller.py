@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vjudge.engine.caller import AICallerEngine, CallerTurn
-from vjudge.core.models import LLMConfig, Scenario
+from judge_it.engine.caller import AICallerEngine, CallerTurn
+from judge_it.core.models import LLMConfig, Scenario
 
 
 def _scenario(max_turns: int = 30, persona: str = "You are Iris.") -> Scenario:
@@ -307,7 +307,7 @@ async def test_string_booleans_truthy_paths(value):
 async def test_logwriter_records_llm_call_with_token_usage():
     """Usage rides in the LLMResult (P1.2); the engine forwards it to the
     logwriter from the reply itself, never from client state."""
-    from vjudge.llm.base import LLMResult
+    from judge_it.llm.base import LLMResult
 
     llm = _llm_returning(
         LLMResult(

@@ -1,5 +1,5 @@
 # =============================================================================
-#  VJudge V2 — AI-Driven Caller — Example Scenario
+#  JudgeIt V2 — AI-Driven Caller — Example Scenario
 # =============================================================================
 #  What this is:
 #    A complete, realistic test scenario for the new AI-caller schema.
@@ -7,7 +7,7 @@
 #    debt-collection bot ("Michelle").
 #
 #  How it runs:
-#    1. VJudge places a Twilio call to `target`.
+#    1. JudgeIt places a Twilio call to `target`.
 #    2. The LLM caller, driven by `persona`, holds the conversation:
 #       takes bot turns from Deepgram STT, returns JSON with `speech`
 #       and/or `dtmf` for our reply.
@@ -230,12 +230,12 @@ evaluation_prompt: |
 
 # -----------------------------------------------------------------------------
 # llm (optional) — override the default models / provider for this scenario.
-# If omitted, vjudge uses the global defaults set via env vars
-# (VJUDGE_CALLER_MODEL, VJUDGE_EVALUATOR_MODEL).
+# If omitted, judge_it uses the global defaults set via env vars
+# (JUDGE_IT_CALLER_MODEL, JUDGE_IT_EVALUATOR_MODEL).
 #
 # Provider auto-detected from the model name prefix (gemini-*, claude-*, gpt-*),
 # or set explicitly via `provider:`. New providers plug in by adding
-# vjudge/llm/<provider>.py — no schema change needed.
+# judge_it/llm/<provider>.py — no schema change needed.
 # -----------------------------------------------------------------------------
 llm:
   caller_model: gemini-2.5-flash      # cheap + fast, ~15-25 turns per call

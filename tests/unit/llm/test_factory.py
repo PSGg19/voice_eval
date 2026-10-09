@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from vjudge.llm import detect_provider, get_client
-from vjudge.llm.gemini import GeminiClient
+from judge_it.llm import detect_provider, get_client
+from judge_it.llm.gemini import GeminiClient
 
 
 def test_detect_gemini():

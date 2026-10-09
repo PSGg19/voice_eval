@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from vjudge.core.config import Settings
-from vjudge.transport.call import CallManager
-from vjudge.voice.frames import InboundAudio
-from vjudge.voice.provider import (
+from judge_it.core.config import Settings
+from judge_it.transport.call import CallManager
+from judge_it.voice.frames import InboundAudio
+from judge_it.voice.provider import (
     LiveKitSIPProvider,
     ProviderRefusal,
     TwilioProvider,
@@ -59,7 +59,7 @@ def test_india_without_the_livekit_provider_is_refused_with_the_rule_named():
 def test_preflight_names_the_compliance_rule_for_an_india_voice_run():
     """The PRD acceptance: an India-region target with a US-only provider is
     refused at pre-flight, naming the rule (this list IS the 422 body)."""
-    from vjudge.api.service import preflight_refusals
+    from judge_it.api.service import preflight_refusals
 
     refusals = preflight_refusals(
         None, transport="sip", region="in", settings=make_settings()

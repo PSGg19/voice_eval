@@ -5,10 +5,10 @@ import logging
 
 import pytest
 
-from vjudge.connectors.logs import _FORBIDDEN_LABELS, _labels_from_env
-from vjudge.connectors.logs import build as build_sink
-from vjudge.connectors.tracing import NoOpTracer
-from vjudge.connectors.tracing import build as build_tracer
+from judge_it.connectors.logs import _FORBIDDEN_LABELS, _labels_from_env
+from judge_it.connectors.logs import build as build_sink
+from judge_it.connectors.tracing import NoOpTracer
+from judge_it.connectors.tracing import build as build_tracer
 
 
 # ------------------------------------------------------------------- tracing
@@ -59,7 +59,7 @@ def test_disabled_or_bogus_tracing_yields_noop(monkeypatch, value):
 def test_log_sink_defaults_to_readable_text(monkeypatch):
     monkeypatch.delenv("LOG_SINK", raising=False)
     handler = build_sink()
-    rec = logging.LogRecord("vjudge.x", logging.INFO, "f.py", 1, "hello", (), None)
+    rec = logging.LogRecord("judge_it.x", logging.INFO, "f.py", 1, "hello", (), None)
     assert "hello" in handler.format(rec)
 
 
@@ -67,12 +67,12 @@ def test_json_sink_puts_the_run_id_in_the_body(monkeypatch):
     """Not as a label — that is the Loki cardinality rule."""
     import json
 
-    from vjudge.core.log_context import call_id_var
+    from judge_it.core.log_context import call_id_var
 
     handler = build_sink(override="json")
     token = call_id_var.set("run_abc")
     try:
-        rec = logging.LogRecord("vjudge.x", logging.INFO, "f.py", 7, "turn done", (), None)
+        rec = logging.LogRecord("judge_it.x", logging.INFO, "f.py", 7, "turn done", (), None)
         payload = json.loads(handler.format(rec))
     finally:
         call_id_var.reset(token)
@@ -86,16 +86,16 @@ def test_json_sink_omits_run_id_outside_a_run(monkeypatch):
     import json
 
     handler = build_sink(override="json")
-    rec = logging.LogRecord("vjudge.x", logging.INFO, "f.py", 1, "startup", (), None)
+    rec = logging.LogRecord("judge_it.x", logging.INFO, "f.py", 1, "startup", (), None)
     assert "run_id" not in json.loads(handler.format(rec))
 
 
 def test_loki_labels_stay_low_cardinality(monkeypatch):
-    monkeypatch.setenv("OTEL_SERVICE_NAME", "vjudge")
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "judge_it")
     monkeypatch.setenv("DEPLOY_ENV", "prod")
     monkeypatch.setenv("LOG_LABEL_REGION", "us")
     labels = _labels_from_env()
-    assert labels == {"service": "vjudge", "env": "prod", "region": "us"}
+    assert labels == {"service": "judge_it", "env": "prod", "region": "us"}
     assert not (_FORBIDDEN_LABELS & set(labels))
 
 

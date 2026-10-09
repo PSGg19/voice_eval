@@ -14,18 +14,18 @@ import time
 
 import pytest
 
-from vjudge.core.models import Scenario
-from vjudge.engine.caller import AICallerEngine
-from vjudge.engine.conversation import ConversationEngine
-from vjudge.llm.base import LLMResult
-from vjudge.voice.audio_out import AudioOut
-from vjudge.voice.engine_bridge import EngineBridge
-from vjudge.voice.frames import InboundAudio
-from vjudge.voice.processor import Chain
-from vjudge.voice.serializers import TwilioSerializer
-from vjudge.voice.stt_processor import STTProcessor
-from vjudge.voice.turn_detect import TurnDetector
-from vjudge.voice.tts_processor import TTSProcessor
+from judge_it.core.models import Scenario
+from judge_it.engine.caller import AICallerEngine
+from judge_it.engine.conversation import ConversationEngine
+from judge_it.llm.base import LLMResult
+from judge_it.voice.audio_out import AudioOut
+from judge_it.voice.engine_bridge import EngineBridge
+from judge_it.voice.frames import InboundAudio
+from judge_it.voice.processor import Chain
+from judge_it.voice.serializers import TwilioSerializer
+from judge_it.voice.stt_processor import STTProcessor
+from judge_it.voice.turn_detect import TurnDetector
+from judge_it.voice.tts_processor import TTSProcessor
 
 
 def fd_count() -> int:

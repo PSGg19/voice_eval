@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from prometheus_client import REGISTRY
 
-from vjudge.observers.events import (
+from judge_it.observers.events import (
     BotTurn,
     CallerTurn,
     Generation,
     RunFinished,
     RunStarted,
 )
-from vjudge.observers.metrics_observer import (
+from judge_it.observers.metrics_observer import (
     LLM_TOKENS_TOTAL,
     RUNS_IN_FLIGHT,
     RUNS_TOTAL,
@@ -68,11 +68,11 @@ def test_in_flight_gauge_rises_then_falls():
     assert g._value.get() == base
 
 
-def test_no_vjudge_metric_uses_a_high_cardinality_label():
+def test_no_judge_it_metric_uses_a_high_cardinality_label():
     """PRD: label discipline enforced — no run/scenario/interaction ids as
-    labels, on ANY vjudge_* metric now or later."""
+    labels, on ANY judge_it_* metric now or later."""
     for metric in REGISTRY.collect():
-        if not metric.name.startswith("vjudge_"):
+        if not metric.name.startswith("judge_it_"):
             continue
         for sample in metric.samples:
             bad = FORBIDDEN_LABELS & set(sample.labels)

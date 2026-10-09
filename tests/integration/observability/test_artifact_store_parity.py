@@ -8,7 +8,7 @@ import uuid
 import httpx
 import pytest
 
-from vjudge.artifacts import LocalArtifactStore, S3ArtifactStore
+from judge_it.artifacts import LocalArtifactStore, S3ArtifactStore
 
 MINIO = "http://localhost:9000"
 
@@ -28,10 +28,10 @@ def test_same_key_same_bytes_through_both_adapters(tmp_path):
 
     local = LocalArtifactStore(root=str(tmp_path))
     s3 = S3ArtifactStore(
-        bucket="vjudge-artifacts",
+        bucket="judge_it-artifacts",
         endpoint=MINIO,
-        access_key="vjudge",
-        secret_key="vjudge-local-only",
+        access_key="judge_it",
+        secret_key="judge_it-local-only",
     )
 
     # The KEY is the identity: both adapters accept it verbatim…

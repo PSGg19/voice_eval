@@ -18,23 +18,23 @@ What it does:
    — stale shebangs from a moved repo, etc).
 3. Installs **pinned** dependencies from `requirements.txt` for
    byte-identical environments across the team (equivalent to `npm ci`).
-4. Installs `vjudge` in editable mode so the `vjudge` console-script
+4. Installs `judge_it` in editable mode so the `judge_it` console-script
    wires up (equivalent to `npm link`).
 5. Copies `.env.example` → `.env` if `.env` doesn't exist (does NOT
    overwrite an existing one).
-6. Verifies `vjudge --help` works.
+6. Verifies `judge_it --help` works.
 7. Prints next-step guidance.
 
-After running setup, you have two ways to invoke `vjudge`:
+After running setup, you have two ways to invoke `judge_it`:
 
 ```bash
-# Option A: activate the venv (then plain `vjudge` works for the session)
+# Option A: activate the venv (then plain `judge_it` works for the session)
 source .venv/bin/activate
-vjudge --help
+judge_it --help
 # (`deactivate` to leave)
 
 # Option B: use the venv binary directly (no activation needed)
-.venv/bin/vjudge --help
+.venv/bin/judge_it --help
 ```
 
 ## `test.sh` — run tests at any granularity
@@ -80,7 +80,7 @@ live tests still skip safely.
 # 2. Regenerate requirements.txt
 .venv/bin/python -m pip freeze \
     | grep -v "^-e " \
-    | grep -v "^vjudge" \
+    | grep -v "^judge_it" \
     > requirements.txt
 
 # 3. Commit the change
@@ -88,5 +88,5 @@ git add requirements.txt
 git commit -m "deps: bump <package> to <version>"
 ```
 
-The `grep -v` filters drop vjudge itself (installed editable, not a
+The `grep -v` filters drop judge_it itself (installed editable, not a
 distributable package) so requirements.txt stays clean.

@@ -6,9 +6,9 @@ on the built SIP URI).
 """
 from __future__ import annotations
 
-from vjudge.core.config import Settings
-from vjudge.core.region_profile import resolve_profile
-from vjudge.transport.call import CallManager
+from judge_it.core.config import Settings
+from judge_it.core.region_profile import resolve_profile
+from judge_it.transport.call import CallManager
 
 
 def make_settings(**over) -> Settings:
@@ -18,12 +18,12 @@ def make_settings(**over) -> Settings:
         twilio_phone_number="+15550001111",
         deepgram_api_key="dg",
         call_transport="sip",
-        osv_base_url="https://llm-studio.vjudge.dev/us/api/interface",
+        osv_base_url="https://llm-studio.judge_it.dev/us/api/interface",
         sip_destination_host="usproj.sip.livekit.cloud:5060",
         sip_trunk_number="1205",
         sip_destination_host_in="inproj.sip.livekit.cloud:5060",
         sip_trunk_number_in="2001",
-        sip_provider_config_in="livekit-vjudgetl-2",
+        sip_provider_config_in="livekit-judge_ittl-2",
     )
     base.update(over)
     return Settings(_env_file=None, **base)
@@ -47,7 +47,7 @@ def test_india_profile_selects_india_ingress_and_did_stays_a_header():
     assert "91806" not in addr
     assert "X-VirtualNumber=%2B918062123187" in dial_to
     # Correlation + test marking still ride along.
-    assert "X-VJudge-Session-Id=sess123" in dial_to
+    assert "X-JudgeIt-Session-Id=sess123" in dial_to
     assert "X-Is-Test=0" in dial_to
     assert extra == {}
 

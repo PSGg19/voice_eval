@@ -13,10 +13,10 @@ Usage:
         --steps 25,50,75,100
 
 Then run (start small!):
-    vjudge campaign clients/load-test/.generated/load-025.yaml -m 25
-    vjudge campaign clients/load-test/.generated/load-050.yaml -m 50
-    vjudge campaign clients/load-test/.generated/load-075.yaml -m 75
-    vjudge campaign clients/load-test/.generated/load-100.yaml -m 100
+    judge_it campaign clients/load-test/.generated/load-025.yaml -m 25
+    judge_it campaign clients/load-test/.generated/load-050.yaml -m 50
+    judge_it campaign clients/load-test/.generated/load-075.yaml -m 75
+    judge_it campaign clients/load-test/.generated/load-100.yaml -m 100
 
 Each call is a real outbound call. The whole .generated/ tree is
 gitignored.
@@ -96,7 +96,7 @@ def main() -> None:
         camp = (
             f"# AUTO-GENERATED — load ramp step: {k} concurrent V2 calls.\n"
             f"# Run with the matching concurrency:\n"
-            f"#   vjudge campaign {out}/load-{k:03d}.yaml -m {k}\n"
+            f"#   judge_it campaign {out}/load-{k:03d}.yaml -m {k}\n"
             f"# Every entry is the same small-talk persona; {k} distinct\n"
             f"# files are required because the loader dedupes paths.\n\n"
             f'name: "Load Test · ramp {k}"\n'
@@ -115,7 +115,7 @@ def main() -> None:
     print("\nDone. Start small and ramp up:")
     for k in steps:
         if k <= total:
-            print(f"  vjudge campaign {out}/load-{k:03d}.yaml -m {k}")
+            print(f"  judge_it campaign {out}/load-{k:03d}.yaml -m {k}")
 
 
 if __name__ == "__main__":
