@@ -20,7 +20,7 @@ from tests.unit.voice.test_processor import run_processor
 class FakeVAD:
     """Deterministic SileroBotVAD surface with a controllable block time."""
 
-    def __init__(self, block_s: float = 0.0):
+    def __init__(self, block_s: float = 0.0) -> None:
         self.block_s = block_s
         self.fed: list[bytes] = []
         self.voice = False
