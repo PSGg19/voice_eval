@@ -29,7 +29,9 @@ TRUNK = "1205"
 
 
 def test_build_uri_bare():
-    assert build_sip_uri(user=TRUNK, host=LIVEKIT_HOST) == f"sip:1205@{LIVEKIT_HOST}"
+    uri = build_sip_uri(user=TRUNK, host=LIVEKIT_HOST)
+    expected = f"sip:1205@{LIVEKIT_HOST}"
+    assert uri == expected
 
 
 def test_build_uri_canonical_shape_vjudge_dials():
