@@ -14,11 +14,9 @@ def test_detect_anthropic():
     assert detect_provider("claude-sonnet-4-6") == "anthropic"
 
 
-def test_detect_openai():
-    assert detect_provider("gpt-4o") == "openai"
-    assert detect_provider("o3-mini") == "openai"
-    assert detect_provider("o1-preview") == "openai"
-    assert detect_provider("o4-mini") == "openai"
+@pytest.mark.parametrize("model_name", ["gpt-4o", "o3-mini", "o1-preview", "o4-mini"])
+def test_detect_openai(model_name: str):
+    assert detect_provider(model_name) == "openai"
 
 
 def test_detect_unknown():
