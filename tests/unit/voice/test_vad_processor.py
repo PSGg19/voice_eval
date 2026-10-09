@@ -6,13 +6,13 @@ import time
 
 import pytest
 
-from judge_it.voice.frames import (
+from vjudge.voice.frames import (
     CallEnded,
     InboundAudio,
     SpeechStarted,
     UtteranceBoundary,
 )
-from judge_it.voice.vad_processor import VADProcessor
+from vjudge.voice.vad_processor import VADProcessor
 
 from tests.unit.voice.test_processor import run_processor
 

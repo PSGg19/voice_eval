@@ -15,9 +15,9 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from judge_it.core.config import Settings
-from judge_it.queue.registry import WorkerRegistry
-from judge_it.transport.call import CallManager
+from vjudge.core.config import Settings
+from vjudge.queue.registry import WorkerRegistry
+from vjudge.transport.call import CallManager
 
 
 @pytest_asyncio.fixture

@@ -10,10 +10,10 @@ import asyncio
 import httpx
 import pytest
 
-from judge_it.core.config import Settings
-from judge_it.core.models import Scenario
-from judge_it.orchestrator.runner import TestRunner
-from judge_it.transport.text import TextTransport
+from vjudge.core.config import Settings
+from vjudge.core.models import Scenario
+from vjudge.orchestrator.runner import TestRunner
+from vjudge.transport.text import TextTransport
 
 
 def make_settings(**over) -> Settings:
@@ -45,7 +45,7 @@ def test_same_model_yields_the_same_client_instance(monkeypatch):
         built.append(model)
         return object()
 
-    monkeypatch.setattr("judge_it.orchestrator.runner.get_client", fake_get_client)
+    monkeypatch.setattr("vjudge.orchestrator.runner.get_client", fake_get_client)
     runner = TestRunner(make_settings())
 
     a = runner._shared_llm("gemini-2.5-flash", None)

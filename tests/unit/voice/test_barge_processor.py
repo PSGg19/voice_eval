@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-from judge_it.core.models import BargeInConfig, Scenario, ScheduledTrigger
-from judge_it.engine.caller import AICallerEngine
-from judge_it.frames import BotPartialSpeech, BotTurnEnded, CallerSpeech
-from judge_it.llm.base import LLMResult
-from judge_it.voice.barge_processor import BargeProcessor
+from vjudge.core.models import BargeInConfig, Scenario, ScheduledTrigger
+from vjudge.engine.caller import AICallerEngine
+from vjudge.frames import BotPartialSpeech, BotTurnEnded, CallerSpeech
+from vjudge.llm.base import LLMResult
+from vjudge.voice.barge_processor import BargeProcessor
 
 from tests.unit.voice.test_processor import run_processor
 
@@ -146,7 +146,7 @@ async def test_llm_mode_polls_and_barges_on_decision():
         if proc.fired:
             break
 
-    from judge_it.voice.frames import CallEnded
+    from vjudge.voice.frames import CallEnded
 
     await proc.inbox.put(CallEnded())
     await asyncio.wait_for(proc._run_task, 5)
@@ -181,7 +181,7 @@ async def test_noop_on_text_by_construction():
     scenario = scheduled_scenario(at_turn=1, after_words=0)
     caller = AICallerEngine(scenario, BargeLLM())
     # a text-shaped stream: finals and turn ends only, no partials
-    from judge_it.frames import BotFinalSpeech
+    from vjudge.frames import BotFinalSpeech
 
     out = await run_processor(BargeProcessor(caller), [
         BotFinalSpeech(text="Hello, this is the bank."), BotTurnEnded(),

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from judge_it.artifacts import LocalArtifactStore, build_store
+from vjudge.artifacts import LocalArtifactStore, build_store
 
 
 def test_local_round_trip(tmp_path):

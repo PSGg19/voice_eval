@@ -4,7 +4,7 @@ PRD acceptance tests live here:
 * a `region=in` run resolves the India OSV URL AND the India SIP trunk while a
   `region=us` run resolves the US pair, in one process;
 * the resolver returns the right trunk for a known India DID's config
-  (`livekit-judge_ittl-2`) and the text base URL for that region from one call;
+  (`livekit-vjudgetl-2`) and the text base URL for that region from one call;
 * an unconfigured region is refused BEFORE any call is placed;
 * PSTN into India is refused as non-compliant (S6), never dialled.
 """
@@ -14,8 +14,8 @@ import dataclasses
 
 import pytest
 
-from judge_it.core.config import Settings
-from judge_it.core.region_profile import (
+from vjudge.core.config import Settings
+from vjudge.core.region_profile import (
     PSTN_ALLOWED_REGIONS,
     RegionNotCompliant,
     RegionNotConfigured,
@@ -25,15 +25,15 @@ from judge_it.core.region_profile import (
 
 
 def make_settings(**over) -> Settings:
-    """Settings from explicit kwargs only — immune to whatever JUDGE_IT_*
+    """Settings from explicit kwargs only — immune to whatever VJUDGE_*
     happens to be exported in the developer's shell."""
     base = dict(
         twilio_account_sid="ACtest",
         twilio_auth_token="token",
         twilio_phone_number="+15550001111",
         deepgram_api_key="dg",
-        osv_base_url="https://llm-studio.judge_it.dev/us/api/interface",
-        text_runtime_base_url="https://llm-studio.judge_it.dev/us/api/text",
+        osv_base_url="https://llm-studio.vjudge.dev/us/api/interface",
+        text_runtime_base_url="https://llm-studio.vjudge.dev/us/api/text",
         sip_destination_host="",
         sip_trunk_number="",
         sip_destination_host_us="",
@@ -54,7 +54,7 @@ def make_settings(**over) -> Settings:
 
 @pytest.mark.parametrize("seg", ["us", "in", "ca"])
 def test_default_region_inferred_from_osv_url(seg):
-    s = make_settings(osv_base_url=f"https://llm-studio.judge_it.dev/{seg}/api/interface")
+    s = make_settings(osv_base_url=f"https://llm-studio.vjudge.dev/{seg}/api/interface")
     assert default_region(s) == seg
 
 
@@ -71,14 +71,14 @@ def test_none_region_leaves_urls_untouched():
     s = make_settings(text_runtime_base_url="http://localhost:8001")
     p = resolve_profile(None, s)
     assert p.text_runtime_base_url == "http://localhost:8001"
-    assert p.osv_base_url == "https://llm-studio.judge_it.dev/us/api/interface"
+    assert p.osv_base_url == "https://llm-studio.vjudge.dev/us/api/interface"
     assert p.region == "us"
 
 
 def test_explicit_region_swaps_both_urls():
     p = resolve_profile("in", make_settings())
-    assert p.osv_base_url == "https://llm-studio.judge_it.dev/in/api/interface"
-    assert p.text_runtime_base_url == "https://llm-studio.judge_it.dev/in/api/text"
+    assert p.osv_base_url == "https://llm-studio.vjudge.dev/in/api/interface"
+    assert p.text_runtime_base_url == "https://llm-studio.vjudge.dev/in/api/text"
     assert p.region == "in"
 
 
@@ -132,9 +132,9 @@ def test_sip_into_unconfigured_region_refused_before_dial():
     with pytest.raises(RegionNotConfigured) as exc:
         resolve_profile("in", s, for_transport="sip")
     msg = str(exc.value)
-    assert "JUDGE_IT_SIP_DESTINATION_HOST_IN" in msg
-    assert "JUDGE_IT_SIP_TRUNK_NUMBER_IN" in msg
-    assert "livekit-judge_ittl-2" in msg          # names where the answer lives
+    assert "VJUDGE_SIP_DESTINATION_HOST_IN" in msg
+    assert "VJUDGE_SIP_TRUNK_NUMBER_IN" in msg
+    assert "livekit-vjudgetl-2" in msg          # names where the answer lives
     assert "No call was placed" in msg
 
 
@@ -175,7 +175,7 @@ def test_us_and_india_resolve_concurrently_in_one_process():
         sip_trunk_number_us="1205",
         sip_destination_host_in="inproj.sip.livekit.cloud:5060",
         sip_trunk_number_in="2001",
-        sip_provider_config_in="livekit-judge_ittl-2",
+        sip_provider_config_in="livekit-vjudgetl-2",
     )
     us = resolve_profile("us", s, for_transport="sip")
     india = resolve_profile("in", s, for_transport="sip")
@@ -191,17 +191,17 @@ def test_us_and_india_resolve_concurrently_in_one_process():
         us.sip_destination_host = "mutated"  # type: ignore[misc]
 
 
-def test_india_profile_carries_judge_ittl2_provider_config():
+def test_india_profile_carries_vjudgetl2_provider_config():
     """PRD acceptance: the resolver returns the right trunk config for the
-    known India DID's project (`+918062123187` → livekit-judge_ittl-2) and the
+    known India DID's project (`+918062123187` → livekit-vjudgetl-2) and the
     text base URL for that region, from one call."""
     s = make_settings(
         sip_destination_host_in="inproj.sip.livekit.cloud:5060",
         sip_trunk_number_in="2001",
-        sip_provider_config_in="livekit-judge_ittl-2",
+        sip_provider_config_in="livekit-vjudgetl-2",
     )
     p = resolve_profile("in", s, for_transport="sip")
-    assert p.provider_config == "livekit-judge_ittl-2"    # P3.10 hook
+    assert p.provider_config == "livekit-vjudgetl-2"    # P3.10 hook
     assert p.text_runtime_base_url.endswith("/in/api/text")
     assert p.sip_configured
 

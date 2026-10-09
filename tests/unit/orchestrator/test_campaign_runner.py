@@ -14,14 +14,14 @@ from typing import Optional
 
 import pytest
 
-from judge_it.core.log_context import worker_id_var
-from judge_it.core.models import (
+from vjudge.core.log_context import worker_id_var
+from vjudge.core.models import (
     Campaign,
     CallResult,
     CallStatus,
     EvaluationResult,
 )
-from judge_it.orchestrator.campaign_runner import CampaignRunner
+from vjudge.orchestrator.campaign_runner import CampaignRunner
 
 
 def _make_campaign(

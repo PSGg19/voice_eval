@@ -13,11 +13,11 @@ import json
 
 import pytest
 
-from judge_it.core.models import CallResult, CallStatus, Scenario
-from judge_it.engine.caller import AICallerEngine
-from judge_it.engine.conversation import ConversationEngine
-from judge_it.llm.base import LLMResult
-from judge_it.voice.session import VoiceSession
+from vjudge.core.models import CallResult, CallStatus, Scenario
+from vjudge.engine.caller import AICallerEngine
+from vjudge.engine.conversation import ConversationEngine
+from vjudge.llm.base import LLMResult
+from vjudge.voice.session import VoiceSession
 
 
 def make_scenario(max_turns: int = 6) -> Scenario:
@@ -259,7 +259,7 @@ async def test_dtmf_timeout_yields_the_same_label_as_v2():
 
     assert await wait_for(lambda: completion.is_set())
     assert result.status == CallStatus.ERROR
-    assert result.error.startswith("JUDGE_IT DTMF TIMEOUT")
+    assert result.error.startswith("VJUDGE DTMF TIMEOUT")
     await session.end_session()
     assert session.chain.orphans() == []
 

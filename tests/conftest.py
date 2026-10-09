@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the judge_it test suite."""
+"""Shared pytest fixtures for the vjudge test suite."""
 from __future__ import annotations
 
 import os
@@ -13,13 +13,13 @@ def _hermetic_environment():
     """Strip ambient deployment env before any test runs.
 
     pydantic-settings lets process env BEAT the .env file, so a developer
-    shell that has `export`-ed JUDGE_IT_* (or sourced the observability env)
+    shell that has `export`-ed VJUDGE_* (or sourced the observability env)
     silently changes what Settings() resolves inside tests — ~50 tests fail
     with region/preflight/queue mismatches that never reproduce in a clean
     shell. Tests that need these vars set their own via monkeypatch."""
     doomed = [
         k for k in os.environ
-        if k.startswith(("JUDGE_IT_", "OTEL_", "LANGFUSE_", "PHOENIX_"))
+        if k.startswith(("VJUDGE_", "OTEL_", "LANGFUSE_", "PHOENIX_"))
         or k in ("TRACING_PROVIDER", "LOG_SINK", "LOKI_URL",
                  "TRACE_CAPTURE_LLM_IO", "TRACE_SAMPLE_RATE", "DEPLOY_ENV")
     ]

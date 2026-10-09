@@ -18,8 +18,8 @@ identical from a scenario log ("the call never connected"):
                                          trunk's headersToAttributes key
                                          doesn't match our header name).
 
-This probe distinguishes them. It deliberately does NOT use judge_it's
-`url=` TwiML callback, so **no ngrok / JUDGE_IT_PUBLIC_URL is needed** —
+This probe distinguishes them. It deliberately does NOT use vjudge's
+`url=` TwiML callback, so **no ngrok / VJUDGE_PUBLIC_URL is needed** —
 inline TwiML holds the call open long enough for the bot to answer and
 start its greeting, then hangs up.
 
@@ -33,7 +33,7 @@ Usage:
   python scripts/probe_sip_invite.py
 
   # Point at a .env living elsewhere (e.g. the main checkout).
-  python scripts/probe_sip_invite.py --env-file /path/to/judge_it/.env
+  python scripts/probe_sip_invite.py --env-file /path/to/vjudge/.env
 
   # Take the target from a scenario YAML instead of passing it by hand.
   python scripts/probe_sip_invite.py \
@@ -64,7 +64,7 @@ nothing about UDP reachability from Twilio.
 
 Then feed the printed Call SID to the bot-side tooling to confirm what
 LiveKit actually saw:
-  /judge_it-call-debug <interaction-or-call-id> --deep
+  /vjudge-call-debug <interaction-or-call-id> --deep
 The thing to look for is the SIP participant's `virtualNumber` attribute
 matching --target, which is what proves the header round-tripped.
 
@@ -77,7 +77,7 @@ db 63), which is how this path was first confirmed:
       AND (key ILIKE '%virtual%' OR key ILIKE 'x-%' OR key = 'ani');
 
 A passing run shows `x-virtualnumber` / `virtual_number` = the --target
-with a literal '+', plus `x-judge_it-session-id` and `x-is-test`.
+with a literal '+', plus `x-vjudge-session-id` and `x-is-test`.
 """
 
 from __future__ import annotations
@@ -89,8 +89,8 @@ import time
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
-from judge_it.core.config import Settings
-from judge_it.transport.call import CallManager
+from vjudge.core.config import Settings
+from vjudge.transport.call import CallManager
 
 # QA-01's target — the Veros IB 2.0 number the replication scenarios dial.
 DEFAULT_TARGET = "+18447331982"
@@ -187,10 +187,10 @@ def main() -> int:
 
     if settings.call_transport != "sip":
         print(
-            f"FAIL — JUDGE_IT_CALL_TRANSPORT is {settings.call_transport!r}, not 'sip'.\n"
+            f"FAIL — VJUDGE_CALL_TRANSPORT is {settings.call_transport!r}, not 'sip'.\n"
             "       This probe tests the SIP path; set it (and "
-            "JUDGE_IT_SIP_DESTINATION_HOST /\n"
-            "       JUDGE_IT_SIP_TRUNK_NUMBER) before running."
+            "VJUDGE_SIP_DESTINATION_HOST /\n"
+            "       VJUDGE_SIP_TRUNK_NUMBER) before running."
         )
         return 2
 
@@ -296,7 +296,7 @@ def main() -> int:
         print("  connected. Signaling, auth and IP allow-listing are all fine.")
         print()
         print("  STILL TO CONFIRM — routing. Check the bot side for this call:")
-        print(f"    /judge_it-call-debug {call.sid} --deep")
+        print(f"    /vjudge-call-debug {call.sid} --deep")
         print(f"  The SIP participant's `virtualNumber` must equal {target!r}.")
         print("  If it's empty or shows '%2B…' unlisted, the header didn't")
         print("  round-trip: either LiveKit isn't percent-decoding the value,")
@@ -311,7 +311,7 @@ def main() -> int:
     print("                     IPs; this path dials from Twilio's SIP-interface")
     print("                     IPs instead. Widen the allow-list or switch the")
     print("                     trunk to digest auth and set")
-    print("                     JUDGE_IT_SIP_AUTH_USERNAME/_PASSWORD.")
+    print("                     VJUDGE_SIP_AUTH_USERNAME/_PASSWORD.")
     print("    404 Not Found  → the trunk number in the user part is wrong.")
     print(f"                     We sent {settings.sip_trunk_number!r}.")
     print("    478 / 480      → host or port unreachable; check")

@@ -14,8 +14,8 @@ from typing import Any, Optional
 
 import pytest
 
-from judge_it.core.config import Settings
-from judge_it.core.models import CallResult, LLMConfig, STTConfig, Scenario, TTSConfig
+from vjudge.core.config import Settings
+from vjudge.core.models import CallResult, LLMConfig, STTConfig, Scenario, TTSConfig
 
 
 def _settings(token: str = "osv_token", **kw) -> Settings:
@@ -25,7 +25,7 @@ def _settings(token: str = "osv_token", **kw) -> Settings:
         twilio_auth_token="token_test",
         twilio_phone_number="+10000000000",
         deepgram_api_key="dg_test",
-        public_url="https://judge_it.example.com",
+        public_url="https://vjudge.example.com",
         call_transport="text",
         osv_access_token=token,
         **kw,
@@ -69,7 +69,7 @@ class FakeOSV:
 
 
 def _install(monkeypatch, fake: FakeOSV) -> None:
-    import judge_it.services.osv.client as osv_client
+    import vjudge.services.osv.client as osv_client
 
     def _ctor(**kwargs):
         fake.constructed = kwargs
@@ -80,7 +80,7 @@ def _install(monkeypatch, fake: FakeOSV) -> None:
 
 async def _enrich(monkeypatch, fake, *, settings=None, scenario=None, result=None,
                   transport=None) -> CallResult:
-    from judge_it.orchestrator.runner import TestRunner
+    from vjudge.orchestrator.runner import TestRunner
 
     _install(monkeypatch, fake)
     runner = TestRunner.__new__(TestRunner)  # bypass __init__: no Twilio/TTS/DB
@@ -165,10 +165,10 @@ async def test_region_is_applied_to_the_osv_base_url(monkeypatch):
     fake = FakeOSV(payload=[])
     await _enrich(
         monkeypatch, fake,
-        settings=_settings(osv_base_url="https://llm-studio.judge_it.dev/us/api/interface"),
+        settings=_settings(osv_base_url="https://llm-studio.vjudge.dev/us/api/interface"),
         scenario=_scenario(region="in"),
     )
-    assert fake.constructed["base_url"] == "https://llm-studio.judge_it.dev/in/api/interface"
+    assert fake.constructed["base_url"] == "https://llm-studio.vjudge.dev/in/api/interface"
     assert fake.constructed["token"] == "osv_token"
 
 
@@ -241,7 +241,7 @@ def test_enrichment_is_called_from_finally_not_the_success_path():
     import inspect
     import re
 
-    from judge_it.orchestrator.runner import TestRunner
+    from vjudge.orchestrator.runner import TestRunner
 
     src = inspect.getsource(TestRunner._run_v2_scenario_body)
     call = src.index("self._enrich_text_result_from_osv(")
@@ -264,7 +264,7 @@ def test_enrichment_is_called_from_finally_not_the_success_path():
 
 # ------------------------------------------------- token fallback (same host only)
 
-_LLM_STUDIO = "https://llm-studio.judge_it.dev/us/api/interface"
+_LLM_STUDIO = "https://llm-studio.vjudge.dev/us/api/interface"
 
 
 @pytest.mark.asyncio
@@ -276,7 +276,7 @@ async def test_falls_back_to_the_text_runtime_token_on_the_same_host(monkeypatch
         settings=_settings(
             token="",
             osv_base_url=_LLM_STUDIO,
-            text_runtime_base_url="https://llm-studio.judge_it.dev/us/api/text",
+            text_runtime_base_url="https://llm-studio.vjudge.dev/us/api/text",
             text_runtime_token="runtime_jwt",
         ),
     )
@@ -308,7 +308,7 @@ async def test_explicit_osv_token_wins_over_the_runtime_token(monkeypatch):
         settings=_settings(
             token="explicit_osv",
             osv_base_url=_LLM_STUDIO,
-            text_runtime_base_url="https://llm-studio.judge_it.dev/us/api/text",
+            text_runtime_base_url="https://llm-studio.vjudge.dev/us/api/text",
             text_runtime_token="runtime_jwt",
         ),
     )
@@ -334,10 +334,10 @@ async def test_the_region_is_applied_to_both_urls_before_the_host_check(monkeypa
         settings=_settings(
             token="",
             osv_base_url=_LLM_STUDIO,
-            text_runtime_base_url="https://llm-studio.judge_it.dev/us/api/text",
+            text_runtime_base_url="https://llm-studio.vjudge.dev/us/api/text",
             text_runtime_token="runtime_jwt",
         ),
         scenario=_scenario(region="in"),
     )
-    assert fake.constructed["base_url"] == "https://llm-studio.judge_it.dev/in/api/interface"
+    assert fake.constructed["base_url"] == "https://llm-studio.vjudge.dev/in/api/interface"
     assert fake.constructed["token"] == "runtime_jwt"
