@@ -10,7 +10,7 @@ from vjudge.engine.assertions import FAILED, INCONCLUSIVE, PASSED, evaluate_asse
 
 
 def _by_name(report):
-    return {o.name: o for o in report.outcomes}
+    return {outcome.name: outcome for outcome in report.outcomes}
 
 
 def _tools(*names):
