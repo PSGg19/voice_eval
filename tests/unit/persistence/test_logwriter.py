@@ -38,11 +38,17 @@ def _transcript() -> list[TranscriptEntry]:
     ]
 
 
-def test_slugify():
-    assert slugify("Resurgent · happy path · debit") == "resurgent-happy-path-debit"
-    assert slugify("  multiple   spaces ") == "multiple-spaces"
-    assert slugify("Über@FOO!") == "uber-foo"
-    assert slugify("") == ""
+@pytest.mark.parametrize(
+    "raw_title,expected_slug",
+    [
+        ("Resurgent · happy path · debit", "resurgent-happy-path-debit"),
+        ("  multiple   spaces ", "multiple-spaces"),
+        ("Über@FOO!", "uber-foo"),
+        ("", ""),
+    ],
+)
+def test_slugify(raw_title: str, expected_slug: str):
+    assert slugify(raw_title) == expected_slug
 
 
 def test_folder_naming(tmp_path):
