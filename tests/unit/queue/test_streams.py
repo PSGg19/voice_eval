@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from judge_it.queue.streams import (
+from vjudge.queue.streams import (
     DEAD_STREAM,
     GROUP,
     LANES,

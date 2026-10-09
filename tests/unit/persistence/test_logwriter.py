@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from judge_it.persistence.logwriter import CallLogWriter, slugify
-from judge_it.core.models import (
+from vjudge.persistence.logwriter import CallLogWriter, slugify
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationCriterion,

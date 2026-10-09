@@ -3,14 +3,14 @@
 # refresh_cloudflare_tunnel.sh
 # -----------------------------------------------------------------------------
 # Kills any running cloudflared quick tunnel, starts a fresh one against the
-# local judge_it server port, waits for the new https://*.trycloudflare.com URL,
+# local vjudge server port, waits for the new https://*.trycloudflare.com URL,
 # verifies it actually reaches the server, and rewrites the active
-# JUDGE_IT_PUBLIC_URL line in .env to the new URL.
+# VJUDGE_PUBLIC_URL line in .env to the new URL.
 #
 # Why this exists: trycloudflare.com quick-tunnel hostnames are EPHEMERAL — a
 # new random hostname is minted every time cloudflared (re)starts, and the
 # tunnel can silently die (process alive, edge connection dead). When the URL
-# in .env goes stale, Twilio can't reach judge_it's media stream and plays
+# in .env goes stale, Twilio can't reach vjudge's media stream and plays
 # "an application error has occurred. Goodbye." into every call.
 #
 # Usage:
@@ -25,12 +25,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
-LOG_FILE="/tmp/cloudflared-judge_it.log"
+LOG_FILE="/tmp/cloudflared-vjudge.log"
 
-# --- resolve the local port: arg > .env JUDGE_IT_SERVER_PORT > 8765 ---
+# --- resolve the local port: arg > .env VJUDGE_SERVER_PORT > 8765 ---
 PORT="${1:-}"
 if [[ -z "$PORT" && -f "$ENV_FILE" ]]; then
-  PORT="$(grep -E '^[[:space:]]*JUDGE_IT_SERVER_PORT=' "$ENV_FILE" | tail -1 | cut -d= -f2 | tr -dc '0-9' || true)"
+  PORT="$(grep -E '^[[:space:]]*VJUDGE_SERVER_PORT=' "$ENV_FILE" | tail -1 | cut -d= -f2 | tr -dc '0-9' || true)"
 fi
 PORT="${PORT:-8765}"
 
@@ -120,10 +120,10 @@ else
   echo "  Safe to start the campaign — Twilio can now reach $HOST."
 fi
 
-# --- 5. rewrite the active JUDGE_IT_PUBLIC_URL line in .env ---
+# --- 5. rewrite the active VJUDGE_PUBLIC_URL line in .env ---
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "⚠ .env not found at $ENV_FILE — skipping auto-update. Set manually:"
-  echo "    JUDGE_IT_PUBLIC_URL=$URL"
+  echo "    VJUDGE_PUBLIC_URL=$URL"
   exit 0
 fi
 
@@ -135,20 +135,20 @@ lines = open(path).read().splitlines()
 out, replaced = [], False
 for ln in lines:
     s = ln.lstrip()
-    if not s.startswith("#") and s.startswith("JUDGE_IT_PUBLIC_URL=") and not replaced:
-        out.append(f"JUDGE_IT_PUBLIC_URL={new}   # cloudflare quick tunnel (refreshed)")
+    if not s.startswith("#") and s.startswith("VJUDGE_PUBLIC_URL=") and not replaced:
+        out.append(f"VJUDGE_PUBLIC_URL={new}   # cloudflare quick tunnel (refreshed)")
         replaced = True
     else:
         out.append(ln)
 if not replaced:                       # no active line — append one
-    out.append(f"JUDGE_IT_PUBLIC_URL={new}   # cloudflare quick tunnel (refreshed)")
+    out.append(f"VJUDGE_PUBLIC_URL={new}   # cloudflare quick tunnel (refreshed)")
 open(path, "w").write("\n".join(out) + "\n")
 print("updated" if replaced else "appended")
 PY
 
 echo
 echo "✅ Done. .env now points to:"
-grep -nE '^[[:space:]]*JUDGE_IT_PUBLIC_URL=' "$ENV_FILE"
+grep -nE '^[[:space:]]*VJUDGE_PUBLIC_URL=' "$ENV_FILE"
 echo
 echo "⚠ Restart your campaign/server so it picks up the new .env value:"
-echo "    judge_it campaign clients/veros/campaigns/ib2-fixes.yaml"
+echo "    vjudge campaign clients/veros/campaigns/ib2-fixes.yaml"

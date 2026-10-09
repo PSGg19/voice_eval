@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Run judge_it tests at any granularity.
+# Run vjudge tests at any granularity.
 #
 # Usage:
 #   ./scripts/test.sh                    # run everything (live tests skip without RUN_LIVE)
 #   ./scripts/test.sh unit               # run only unit tier
 #   ./scripts/test.sh integration        # only integration tier
 #   ./scripts/test.sh e2e                # e2e tier (auto-sets RUN_LIVE=1 — uses Twilio credits)
-#   ./scripts/test.sh engine             # only judge_it/engine tests (shortcut for unit/engine)
-#   ./scripts/test.sh core               # only judge_it/core tests
-#   ./scripts/test.sh llm                # only judge_it/llm tests
-#   ./scripts/test.sh persistence        # only judge_it/persistence tests
-#   ./scripts/test.sh bcg                # only judge_it/bcg tests
+#   ./scripts/test.sh engine             # only vjudge/engine tests (shortcut for unit/engine)
+#   ./scripts/test.sh core               # only vjudge/core tests
+#   ./scripts/test.sh llm                # only vjudge/llm tests
+#   ./scripts/test.sh persistence        # only vjudge/persistence tests
+#   ./scripts/test.sh bcg                # only vjudge/bcg tests
 #   ./scripts/test.sh tests/unit/core/test_lint.py    # any explicit path
 #   ./scripts/test.sh -v                 # verbose (pytest -v) — runs everything
 #   ./scripts/test.sh engine -v          # verbose, engine only
@@ -23,7 +23,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Pick a Python interpreter. Prefer the repo's virtualenv if present —
-# that's where judge_it's deps are installed via `pip install -e .`. Fall
+# that's where vjudge's deps are installed via `pip install -e .`. Fall
 # back to `python` then `python3` on PATH for systems where the venv isn't
 # in the canonical .venv/ spot.
 if [[ -x ".venv/bin/python" ]]; then

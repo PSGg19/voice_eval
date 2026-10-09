@@ -1,5 +1,5 @@
 [project]
-name = "judge_it"
+name = "vjudge"
 version = "0.1.0"
 description = "Voice-bot test runner — AI-driven caller + scenario lint + BCG"
 # Upper bound is real: transport/vad.py uses `audioop`, a stdlib module removed
@@ -22,7 +22,7 @@ dependencies = [
     "rich>=13.0",
     "httpx>=0.27",
     # Job-mode state + the per-client prompt cache. Not optional: the server
-    # imports judge_it.jobs.api inside a try/except so a missing Redis cannot take
+    # imports vjudge.jobs.api inside a try/except so a missing Redis cannot take
     # the Twilio webhooks down with it, which means an absent `redis` package
     # degrades to /v1/jobs returning 404 with only a startup WARNING to explain
     # it. Declaring it turns a silent 404 into a working feature.
@@ -49,9 +49,9 @@ observability = [
 storage = [
     "boto3>=1.34",
 ]
-# Silero turn-end detection (JUDGE_IT_USE_SILERO_VAD=true). Kept out of the
+# Silero turn-end detection (VJUDGE_USE_SILERO_VAD=true). Kept out of the
 # base install because torch is a ~200MB download and the setting defaults to
-# false — judge_it runs fine on Deepgram's own turn-end signal. `vad.py` imports
+# false — vjudge runs fine on Deepgram's own turn-end signal. `vad.py` imports
 # these at module level but is itself imported lazily, so the cost is only paid
 # when the feature is switched on.
 vad = [
@@ -72,10 +72,10 @@ livekit = [
 ]
 
 [project.scripts]
-judge_it = "judge_it.cli.main:main"
+vjudge = "vjudge.cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["judge_it*"]
+include = ["vjudge*"]
 
 [tool.pytest.ini_options]
 # The two-worker proof (tests/distributed/) runs real worker subprocesses

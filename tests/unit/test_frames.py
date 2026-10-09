@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-import judge_it.frames as frames
+import vjudge.frames as frames
 
 
 ALL_FRAME_TYPES = [
@@ -49,12 +49,12 @@ def test_module_imports_no_transport_and_no_third_party():
     # inspect what it pulled in.
     import subprocess
     code = (
-        "import sys; import judge_it.frames; "
-        "bad = [m for m in sys.modules if m.startswith('judge_it.') "
-        "and m not in ('judge_it', 'judge_it.frames')]; "
+        "import sys; import vjudge.frames; "
+        "bad = [m for m in sys.modules if m.startswith('vjudge.') "
+        "and m not in ('vjudge', 'vjudge.frames')]; "
         "third = [m for m in sys.modules if m.split('.')[0] in "
         "('twilio', 'httpx', 'fastapi', 'websockets', 'deepgram', 'pydantic')]; "
-        "assert not bad, f'frames imports judge_it modules: {bad}'; "
+        "assert not bad, f'frames imports vjudge modules: {bad}'; "
         "assert not third, f'frames imports third-party: {third}'"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

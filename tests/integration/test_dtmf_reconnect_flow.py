@@ -29,8 +29,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from judge_it.core.models import CallResult
-from judge_it.transport.stream import MediaStreamSession
+from vjudge.core.models import CallResult
+from vjudge.transport.stream import MediaStreamSession
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_end_to_end_dtmf_redirect_round_trip():
         tts_transport="blocking",
         call_manager=call_mgr,
         session_id="integration_sess",
-        reconnect_ws_url="wss://judge_it.test/ws/integration_sess",
+        reconnect_ws_url="wss://vjudge.test/ws/integration_sess",
         dtmf_transport="rest",
         dtmf_reconnect_timeout_s=5.0,
     )
@@ -79,7 +79,7 @@ async def test_end_to_end_dtmf_redirect_round_trip():
     s._attach_count = 1  # pretend handle(ws) already ran once
 
     # Pre-existing transcript entry — must survive the redirect.
-    from judge_it.core.models import TranscriptEntry
+    from vjudge.core.models import TranscriptEntry
 
     s.result.transcript.append(
         TranscriptEntry(turn=0, speaker="bot", text="hello", dtmf="", barge=False)
@@ -117,7 +117,7 @@ async def test_end_to_end_dtmf_redirect_round_trip():
     kwargs = call_mgr.play_dtmf_and_reconnect.call_args.kwargs
     assert kwargs["digits"] == "4012000033330125"
     assert kwargs["call_sid"] == "CA_integration_sid"
-    assert kwargs["reconnect_ws_url"] == "wss://judge_it.test/ws/integration_sess"
+    assert kwargs["reconnect_ws_url"] == "wss://vjudge.test/ws/integration_sess"
 
     # Transition cleared — session ready for the next turn.
     assert s._in_transition is False
@@ -155,7 +155,7 @@ async def test_end_to_end_two_consecutive_redirects():
         tts_transport="blocking",
         call_manager=call_mgr,
         session_id="sess_two",
-        reconnect_ws_url="wss://judge_it.test/ws/sess_two",
+        reconnect_ws_url="wss://vjudge.test/ws/sess_two",
         dtmf_transport="rest",
         dtmf_reconnect_timeout_s=5.0,
     )

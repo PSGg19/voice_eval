@@ -14,13 +14,13 @@ import yaml
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from judge_it.db.importer import (
+from vjudge.db.importer import (
     export_scenario_yaml,
     import_paths,
     summarize,
     to_jsonable,
 )
-from judge_it.db.models import Scenario, VariableSet
+from vjudge.db.models import Scenario, VariableSet
 
 VALID = """\
 name: Importer smoke

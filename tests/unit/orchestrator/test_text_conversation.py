@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from judge_it.core.models import (
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     LLMConfig,
@@ -24,10 +24,10 @@ from judge_it.core.models import (
     Scenario,
     TTSConfig,
 )
-from judge_it.engine.caller import CallerTurn
-from judge_it.engine.conversation import ConversationEngine, Termination
-from judge_it.transport.text import BotTurn
-from judge_it.transport.text_adapter import TextFrameAdapter
+from vjudge.engine.caller import CallerTurn
+from vjudge.engine.conversation import ConversationEngine, Termination
+from vjudge.transport.text import BotTurn
+from vjudge.transport.text_adapter import TextFrameAdapter
 
 
 def _scenario(max_turns: int = 30) -> Scenario:

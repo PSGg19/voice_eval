@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from judge_it.voice.frames import CallEnded, CallStarted, InboundAudio
-from judge_it.voice.processor import Chain, Processor
+from vjudge.voice.frames import CallEnded, CallStarted, InboundAudio
+from vjudge.voice.processor import Chain, Processor
 
 
 async def run_processor(processor: Processor, frames: list, *,

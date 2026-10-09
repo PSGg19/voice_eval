@@ -10,16 +10,16 @@ import asyncio
 
 import pytest
 
-from judge_it.observers import ObservedLLM
-from judge_it.observers.dispatcher import run_dispatcher
-from judge_it.observers.events import (
+from vjudge.observers import ObservedLLM
+from vjudge.observers.dispatcher import run_dispatcher
+from vjudge.observers.events import (
     BotTurn,
     CallerTurn,
     Generation,
     RunFinished,
     RunStarted,
 )
-from judge_it.observers.tracing_observer import TracingObserver
+from vjudge.observers.tracing_observer import TracingObserver
 
 
 class FakeTracer:
@@ -78,7 +78,7 @@ def test_run_becomes_one_trace_with_turn_and_generation_children(traced):
     assert kinds == ["begin", "gbegin", "span", "span", "gend", "gen", "end"]
 
     begin = tracer.calls[0]
-    assert begin[2] == 1000 and begin[3]["judge_it.region"] == "in"
+    assert begin[2] == 1000 and begin[3]["vjudge.region"] == "in"
 
     group = tracer.calls[1]
     assert group[1] == "turn 1" and group[2] == "ROOT"
@@ -87,7 +87,7 @@ def test_run_becomes_one_trace_with_turn_and_generation_children(traced):
     bot = tracer.calls[2]
     # start reconstructed from the bot's OWN latency: at - 2ms
     assert (bot[3], bot[4]) == (3_000_000, 5_000_000)
-    assert bot[2] == "GROUP" and bot[6]["judge_it.module"] == "greeting"
+    assert bot[2] == "GROUP" and bot[6]["vjudge.module"] == "greeting"
 
     caller = tracer.calls[3]
     assert caller[1] == "caller" and caller[2] == "GROUP"
@@ -101,7 +101,7 @@ def test_run_becomes_one_trace_with_turn_and_generation_children(traced):
     assert gen[7]["llm.token_count.prompt"] == 10
 
     end = tracer.calls[6]
-    assert end[2] == 10_000_000 and end[4]["judge_it.passed"] is True
+    assert end[2] == 10_000_000 and end[4]["vjudge.passed"] is True
     assert tracer.flushed == 1
 
 
@@ -167,7 +167,7 @@ def test_terminal_flush_is_exempt_from_slow_warning(caplog):
     import logging as _logging
     import time as _time
 
-    from judge_it.observers.dispatcher import Dispatcher
+    from vjudge.observers.dispatcher import Dispatcher
 
     class SlowFlushTracer(FakeTracer):
         def flush(self):
@@ -192,7 +192,7 @@ class FakeLLM:
         self._fail = fail
 
     async def complete_json(self, *a, **k):
-        from judge_it.llm.base import LLMResult
+        from vjudge.llm.base import LLMResult
 
         await asyncio.sleep(0)
         if self._fail:

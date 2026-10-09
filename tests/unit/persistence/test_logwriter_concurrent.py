@@ -14,16 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from judge_it.core.log_context import call_id_var
-from judge_it.core.models import LLMConfig, STTConfig, Scenario
-from judge_it.persistence.logwriter import CallLogWriter
+from vjudge.core.log_context import call_id_var
+from vjudge.core.models import LLMConfig, STTConfig, Scenario
+from vjudge.persistence.logwriter import CallLogWriter
 
 # Module-level logger so spawned tasks share the same logger object —
-# mimicking how real judge_it modules emit (`logging.getLogger(__name__)`).
+# mimicking how real vjudge modules emit (`logging.getLogger(__name__)`).
 # Set DEBUG explicitly so info() records are actually emitted — in
 # production this is done via logging.basicConfig(level=INFO) in
 # cli/main.py, but the test process has no such global config.
-_TEST_LOGGER = logging.getLogger("judge_it.test.logwriter_concurrent")
+_TEST_LOGGER = logging.getLogger("vjudge.test.logwriter_concurrent")
 _TEST_LOGGER.setLevel(logging.DEBUG)
 
 

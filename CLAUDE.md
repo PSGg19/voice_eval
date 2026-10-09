@@ -1,6 +1,6 @@
-# JudgeIt — working notes for Claude
+# VJudge — working notes for Claude
 
-**Working ON judge_it?** Read on.
+**Working ON vjudge?** Read on.
 **Just want to USE the job API?** → **[`docs/job-api.md`](docs/job-api.md)** is the
 doc to read (and the one to hand to other people). It assumes no repo access, no
 local install and a hosted URL. Everything below is host-side detail that a
@@ -10,7 +10,7 @@ caller neither needs nor can act on.
 
 ## Setting up and running the stack (Claude: this is your runbook)
 
-When a human asks you to set judge_it up or run tests through it, do this —
+When a human asks you to set vjudge up or run tests through it, do this —
 don't reinvent it from the README:
 
 **1. One-time setup** (idempotent — also the "after a git pull" command; it
@@ -22,32 +22,32 @@ runs DB migrations):
 
 It checks the toolchain, creates the venv + installs deps, starts brew
 `postgresql@14` + `redis` (the docker copies in the compose file are unused —
-native services shadow them), creates the `judge_it` DB, runs
+native services shadow them), creates the `vjudge` DB, runs
 `alembic upgrade head`, brings up the observability containers
 (`docker compose --profile logs --profile tracing`), provisions Grafana's
-Loki datasource, builds `../judge_it-web`, and runs the test suite. If the
+Loki datasource, builds `../vjudge-web`, and runs the test suite. If the
 suite fails, read `.dev/setup-pytest.log` — the script prints the two usual
 causes (containers still warming → re-run; ambient env → it prints the
 `env | grep` to check).
 
 **Secrets are human-only — ask, never guess:**
 - `.env` (git-ignored): Twilio SID/token/number, Deepgram key, Gemini key,
-  `JUDGE_IT_OSV_ACCESS_TOKEN` (a ~8h JudgeItAdmin JWT — the human copies it
+  `VJUDGE_OSV_ACCESS_TOKEN` (a ~8h VJudgeAdmin JWT — the human copies it
   from a logged-in llm-studio DevTools session; a 401 anywhere means it
-  expired), SIP trunk vars (`JUDGE_IT_CALL_TRANSPORT=sip`,
-  `JUDGE_IT_SIP_DESTINATION_HOST`, `JUDGE_IT_SIP_TRUNK_NUMBER`), and
-  `JUDGE_IT_QUEUE_ENABLED=true`. A colleague's fastest start is copying a
+  expired), SIP trunk vars (`VJUDGE_CALL_TRANSPORT=sip`,
+  `VJUDGE_SIP_DESTINATION_HOST`, `VJUDGE_SIP_TRUNK_NUMBER`), and
+  `VJUDGE_QUEUE_ENABLED=true`. A colleague's fastest start is copying a
   working `.env` from a teammate and refreshing the OSV token.
-- `~/.judge_it-obs.env` (setup.sh writes a template): observability env.
+- `~/.vjudge-obs.env` (setup.sh writes a template): observability env.
   Langfuse needs a one-time project created at http://localhost:3200 and its
   keys filled in (plus `NEXT_PUBLIC_LANGFUSE_PROJECT_ID` in
-  `../judge_it-web/.env.local`).
+  `../vjudge-web/.env.local`).
 
 **2. Daily loop:**
 
 ```bash
-./scripts/start.sh   # cloudflared tunnel (auto-rewrites JUDGE_IT_PUBLIC_URL
-                     # in .env) → judge_it serve :8765 → one queue worker → web
+./scripts/start.sh   # cloudflared tunnel (auto-rewrites VJUDGE_PUBLIC_URL
+                     # in .env) → vjudge serve :8765 → one queue worker → web
                      # console :3400. Logs in .dev/*.log.
 ./scripts/stop.sh
 ```
@@ -78,35 +78,35 @@ causes (containers still warming → re-run; ambient env → it prints the
   attested `is_synthetic` variable set covers them — that attestation is a
   human decision, never yours.
 
-  CLI alternative (`judge_it run <scenario.yaml>`) is self-contained but binds
+  CLI alternative (`vjudge run <scenario.yaml>`) is self-contained but binds
   :8765 — stop `serve` first.
 
 **Scaling:** `serve` holds many concurrent voice calls on one event loop
-(load-tested at 100); extra `judge_it worker --name w2 [--slots N --reserve M]`
+(load-tested at 100); extra `vjudge worker --name w2 [--slots N --reserve M]`
 processes share text/evaluate/settle. Admission budgets + kill switch:
 `GET/PUT /v1/admission`, live on the console dashboard.
 
 **Postman:** a full collection (29 requests, sample payloads) lives in the
-sibling repo `../postman/collections/judge_it/`.
+sibling repo `../postman/collections/vjudge/`.
 
 **When something is off** — the symptom → fix table is in
 [`docs/local-dev.md`](docs/local-dev.md). The classic: a run stuck ~6 min
 then failing with an empty transcript = the tunnel died → `./scripts/start.sh`.
 
 **Known-pending (as of 2026-09-03):** India voice dialing awaits LiveKit
-trunk coordinates (`JUDGE_IT_LIVEKIT_SIP_*`) — India works for job-mode
+trunk coordinates (`VJUDGE_LIVEKIT_SIP_*`) — India works for job-mode
 seeding/generation and text, not voice dialing. The Veros IB 2.0 bot itself
 is flaky on QA-10 (sometimes omits the day in the due date) — that's a bot
 bug the harness correctly catches, not a harness failure.
 
-JudgeIt places a **real phone call to a voice bot**, plays the caller, and judges
+VJudge places a **real phone call to a voice bot**, plays the caller, and judges
 the result. Three ways to run it:
 
 | Mode | Input | Who writes the scenario |
 |---|---|---|
-| `judge_it run <scenario.yaml>` | one scenario | a human |
-| `judge_it campaign <campaign.yaml>` | a list of scenarios | a human |
-| **job mode** (HTTP, `/v1/jobs`) | **a list of faulty production calls** | **judge_it, from the real call data** |
+| `vjudge run <scenario.yaml>` | one scenario | a human |
+| `vjudge campaign <campaign.yaml>` | a list of scenarios | a human |
+| **job mode** (HTTP, `/v1/jobs`) | **a list of faulty production calls** | **vjudge, from the real call data** |
 
 Everything below is about **job mode**, because that is the one you drive.
 
@@ -145,28 +145,28 @@ faithful and why no test data is needed.
 ## Before you start
 
 Job mode **requires SIP transport** and refuses to run without it (HTTP 400).
-Correlation keys on the `X-JudgeIt-Session-Id` SIP header, which a PSTN call
+Correlation keys on the `X-VJudge-Session-Id` SIP header, which a PSTN call
 cannot carry.
 
 `.env` needs:
 
 ```
-JUDGE_IT_CALL_TRANSPORT=sip
-JUDGE_IT_SIP_DESTINATION_HOST=581mqcm8zvu.sip.livekit.cloud:5060
-JUDGE_IT_SIP_TRUNK_NUMBER=1205
+VJUDGE_CALL_TRANSPORT=sip
+VJUDGE_SIP_DESTINATION_HOST=581mqcm8zvu.sip.livekit.cloud:5060
+VJUDGE_SIP_TRUNK_NUMBER=1205
 
-JUDGE_IT_OSV_BASE_URL=https://llm-studio.judge_it.dev/us/api/interface
-JUDGE_IT_OSV_ACCESS_TOKEN=<JudgeItAdmin access JWT>
-JUDGE_IT_OPENAI_API_KEY=sk-...
+VJUDGE_OSV_BASE_URL=https://llm-studio.vjudge.dev/us/api/interface
+VJUDGE_OSV_ACCESS_TOKEN=<VJudgeAdmin access JWT>
+VJUDGE_OPENAI_API_KEY=sk-...
 
-JUDGE_IT_PUBLIC_URL=https://<tunnel>.trycloudflare.com
+VJUDGE_PUBLIC_URL=https://<tunnel>.trycloudflare.com
 ```
 
 Start the server, and a tunnel so Twilio can reach the media stream:
 
 ```bash
-cloudflared tunnel --url http://localhost:8765   # copy the https URL into JUDGE_IT_PUBLIC_URL
-judge_it serve                                        # or: python -m judge_it serve
+cloudflared tunnel --url http://localhost:8765   # copy the https URL into VJUDGE_PUBLIC_URL
+vjudge serve                                        # or: python -m vjudge serve
 ```
 
 ### Region
@@ -174,11 +174,11 @@ judge_it serve                                        # or: python -m judge_it s
 The region is a **path segment in the OSV base URL**. Change the URL, nothing
 else:
 
-| Region | `JUDGE_IT_OSV_BASE_URL` |
+| Region | `VJUDGE_OSV_BASE_URL` |
 |---|---|
-| US | `https://llm-studio.judge_it.dev/us/api/interface` ← verified |
-| India | `https://llm-studio.judge_it.dev/in/api/interface` ← by analogy, unverified |
-| Canada | `https://llm-studio.judge_it.dev/ca/api/interface` ← by analogy, unverified |
+| US | `https://llm-studio.vjudge.dev/us/api/interface` ← verified |
+| India | `https://llm-studio.vjudge.dev/in/api/interface` ← by analogy, unverified |
+| Canada | `https://llm-studio.vjudge.dev/ca/api/interface` ← by analogy, unverified |
 
 **Do not trust a `region=` query param in an llm-studio URL** — it is frequently
 wrong. The authoritative region is whichever base URL actually returns the
@@ -208,7 +208,7 @@ curl -sX POST localhost:8765/v1/jobs \
   -H 'content-type: application/json' \
   -d '{
     "calls": [
-      "https://llm-studio.judge_it.dev/clients/1e31f185-16ac-4211-827e-46ba19d81a29/conversations/1354?interaction_uuid=c26d1903-…",
+      "https://llm-studio.vjudge.dev/clients/1e31f185-16ac-4211-827e-46ba19d81a29/conversations/1354?interaction_uuid=c26d1903-…",
       "acb65a70-…"
     ],
     "config": {
@@ -232,7 +232,7 @@ Response is immediate:
 | Field | Required | Notes |
 |---|---|---|
 | `calls[]` | **yes** | Full llm-studio links **or bare interaction uuids** — both work. The parser pulls `interaction_uuid` from the query string, and falls back to the first uuid it finds. A `client_uuid` earlier in the path will not confuse it. |
-| `config.target` | **yes** | E.164, the number judge_it dials. This is the **bot's** number — normally an **imported clone** of the live bot, since tests must not phone production. It will differ from the source call's `virtual_id`, and that is correct; correlation matches on client + caller id, never on assistant, precisely because the clone is a different assistant. |
+| `config.target` | **yes** | E.164, the number vjudge dials. This is the **bot's** number — normally an **imported clone** of the live bot, since tests must not phone production. It will differ from the source call's `virtual_id`, and that is correct; correlation matches on client + caller id, never on assistant, precisely because the clone is a different assistant. |
 | `config.region` | no | `us` (default), `in` or `ca`. Selects the OSV gateway per job, so one instance can serve all three. Validated at admission — a bad value is a 400, not a confusing "call not found". |
 | `config.languages` | no | default `["en-US"]`. Drives the persona's language rules — set `["en-US","es-US"]` for a bilingual bot. |
 | `config.max_concurrency` | no | default 2. How many calls run at once. |
@@ -261,7 +261,7 @@ Other options:
 
 - `GET /v1/jobs/{job_id}` — one snapshot, no waiting.
 - `GET /v1/hooks/{sink_id}` — if you set `callback_url` to
-  `http://localhost:8765/v1/hooks/<anything>`, judge_it posts to its own sink and
+  `http://localhost:8765/v1/hooks/<anything>`, vjudge posts to its own sink and
   you read the whole history back, oldest first. Useful for seeing the
   `seeding → generating → ready` progression.
 
@@ -287,8 +287,8 @@ curl -sX POST "localhost:8765/v1/jobs/$JOB/run" \
 
 | | Meaning |
 |---|---|
-| `"eval": false` | **judge_it dials, you judge.** You get session ids, titles, descriptions, what was tested, and a call link per result. Read the transcript and decide. |
-| `"eval": true` (default) | judge_it's own LLM evaluator judges, and each result also carries `passed` and `overall_reasoning`. |
+| `"eval": false` | **vjudge dials, you judge.** You get session ids, titles, descriptions, what was tested, and a call link per result. Read the transcript and decide. |
+| `"eval": true` (default) | vjudge's own LLM evaluator judges, and each result also carries `passed` and `overall_reasoning`. |
 
 Prefer `eval: false` when you intend to inspect the calls yourself — it skips an
 LLM judge whose accuracy is unmeasured (see `docs/platform-evolution.md` §10.2).
@@ -303,12 +303,12 @@ LLM judge whose accuracy is unmeasured (see `docs/platform-evolution.md` §10.2)
   "results": [
     {
       "scenario_id": "S01-c26d1903",
-      "judge_it_session_id": "403ade8595a94409ab3e7c8a8ce14791",
+      "vjudge_session_id": "403ade8595a94409ab3e7c8a8ce14791",
       "source_interaction_uuid": "c26d1903-…",
       "title": "EN closing must not flip to Spanish",
       "description": "Bot switched to Spanish on a short closing phrase.",
       "what_we_tested": "Auth by registered phone + SSN last-4, declined payment, then the short closing.",
-      "call_link": "https://llm-studio.judge_it.dev/clients/1e31f185-…/conversations?interaction_uuid=799a39eb-…",
+      "call_link": "https://llm-studio.vjudge.dev/clients/1e31f185-…/conversations?interaction_uuid=799a39eb-…",
       "interaction_uuid": "799a39eb-…",
       "call_status": "COMPLETED",
       "disposition": "faq_due"
@@ -317,8 +317,8 @@ LLM judge whose accuracy is unmeasured (see `docs/platform-evolution.md` §10.2)
 }
 ```
 
-`call_link` is the thing to hand a human. `judge_it_session_id` is the exact join
-key — it is the SIP header judge_it injected, and it is stored on the bot's
+`call_link` is the thing to hand a human. `vjudge_session_id` is the exact join
+key — it is the SIP header vjudge injected, and it is stored on the bot's
 interaction, so the mapping is not a guess.
 
 If `interaction_uuid` and `call_link` are **null**, correlation failed: the call
@@ -330,10 +330,10 @@ probably never reached the bot. Check `call_status` first.
 
 | Symptom | Cause |
 |---|---|
-| `400 requires JUDGE_IT_CALL_TRANSPORT=sip` | transport is `pstn`. Job mode cannot correlate over PSTN. |
+| `400 requires VJUDGE_CALL_TRANSPORT=sip` | transport is `pstn`. Job mode cannot correlate over PSTN. |
 | `409 job … already exists` | you reused a `job_id`. Omit it. |
 | `409 … has no generated campaign to run` | generation produced nothing lint-clean; read `scenarios[].lint_errors`. |
-| error mentions `no OSV token` | `JUDGE_IT_OSV_ACCESS_TOKEN` is unset or blank. Fails immediately, by design — an empty token would otherwise render the header `Bearer ` and be reported as a network problem. |
+| error mentions `no OSV token` | `VJUDGE_OSV_ACCESS_TOKEN` is unset or blank. Fails immediately, by design — an empty token would otherwise render the header `Bearer ` and be reported as a network problem. |
 | error mentions `OSV 401` | the token expired. Get a fresh one (above). |
 | status `failed`, error mentions `no call could be seeded` | wrong region, expired token, or bad interaction uuid. The error lists the reason per call. |
 | `scenarios[].lint_ok: false` | the model wrote invalid YAML. It gets one automatic repair attempt; a second failure means it is excluded from the campaign. |
@@ -354,7 +354,7 @@ the repo.
 returns `404 Assistant not found`. A `flow_config_id` is not a version.
 
 **Test calls are still recorded as live production interactions**, and marking
-them as tests barely helps. JudgeIt sends `X-Is-Test: 1` (voice) / `is_test: true`
+them as tests barely helps. VJudge sends `X-Is-Test: 1` (voice) / `is_test: true`
 (text). Verified in Loki against the live US runtime: the only thing that flag
 suppresses is the **compliance event**. Post-call processing runs **after every
 turn** — not at call end — and POSTs the caller's name, account number, SSN
@@ -375,9 +375,9 @@ transport: "text"
 is_test: false      # visible in llm-studio (default)
 ```
 
-Deployment fallback is `JUDGE_IT_TEXT_IS_TEST` (default `false`). Text transport
+Deployment fallback is `VJUDGE_TEXT_IS_TEST` (default `false`). Text transport
 only — on a voice call the intent travels as the `X-Is-Test` SIP header, which
-judge_it sets itself, so lint rejects `is_test` on a `sip`/`pstn` scenario.
+vjudge sets itself, so lint rejects `is_test` on a `sip`/`pstn` scenario.
 
 Either way the data is complete and API-readable:
 `OSVClient.get_conversations(client_uuid, interaction_uuid)` returns every turn,
@@ -419,8 +419,8 @@ assert:
 
 `tool_order` is a subsequence (gaps allowed). A failure fails the run whatever
 the evaluator says; unobserved data is INCONCLUSIVE and does **not** fail it.
-Tool assertions need `JUDGE_IT_OSV_ACCESS_TOKEN` — the text runtime does not
-return tool calls, so judge_it fetches them from the conversations API after the
+Tool assertions need `VJUDGE_OSV_ACCESS_TOKEN` — the text runtime does not
+return tool calls, so vjudge fetches them from the conversations API after the
 run. Without it they report INCONCLUSIVE, which is not a pass.
 
 **`metrics:` — declared metrics with types, replacing the JSON blob in the
@@ -439,7 +439,7 @@ metrics:
 ```
 
 Do **not** declare `bot_turns`, `caller_turns`, `modules_visited`,
-`duplicated_text_seen` or `empty_or_tag_only_turns` — judge_it measures those and
+`duplicated_text_seen` or `empty_or_tag_only_turns` — vjudge measures those and
 overrides whatever the evaluator returns. Lint warns
 (`metric_already_measured`). Where the model's number disagrees with the
 measurement, the measurement wins and its claim is kept as
@@ -447,7 +447,7 @@ measurement, the measurement wins and its claim is kept as
 
 **A tag-only bot turn is a bot defect, not a harness one.** OSV strips
 `<LANG:…>`/`<HANGUP>` before filling `output_message`, so a reply of nothing but
-a marker tag arrives as `""` — indistinguishable from silence over HTTP. JudgeIt
+a marker tag arrives as `""` — indistinguishable from silence over HTTP. VJudge
 now recovers those from the conversations API and reports them as
 `Silent bot turns: N tag-only`. The same reply is dead air on a voice call.
 
@@ -456,11 +456,11 @@ now recovers those from the conversations API and reports them as
 ## Repo orientation
 
 ```
-judge_it/jobs/          job mode: api, pipeline, generator, store, workspace
-judge_it/services/osv/  OSV client (metadata, transcript, prompt, interactions list)
-judge_it/transport/     Twilio + SIP dialing, media streams, DTMF
-judge_it/orchestrator/  TestRunner, campaign runner
-judge_it/core/          config, models, scenario/campaign loaders, lint
+vjudge/jobs/          job mode: api, pipeline, generator, store, workspace
+vjudge/services/osv/  OSV client (metadata, transcript, prompt, interactions list)
+vjudge/transport/     Twilio + SIP dialing, media streams, DTMF
+vjudge/orchestrator/  TestRunner, campaign runner
+vjudge/core/          config, models, scenario/campaign loaders, lint
 clients/<name>/       hand-written scenarios and campaigns per client
 plan/v3/              design docs (gitignored)
 ```
@@ -469,5 +469,5 @@ Tests: `python -m pytest tests/ -q`. Two `tests/unit/core/test_lint.py` CLI test
 fail on a stock checkout because of ANSI colour capture — pre-existing, unrelated
 to anything you change.
 
-Scenario schema is enforced by `judge_it/core/lint.py` — that file is the spec.
+Scenario schema is enforced by `vjudge/core/lint.py` — that file is the spec.
 Required keys: `name`, `target`, `vars`, `persona`, `evaluation_prompt`.

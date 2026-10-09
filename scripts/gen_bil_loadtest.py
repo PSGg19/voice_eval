@@ -8,14 +8,14 @@ The campaign loader dedupes scenario PATHS, so N concurrent calls of the same
 persona need N distinct files (each a copy with a unique `name:`). We generate
 100 copies once, and each ramp campaign references the first 20 / 50 / 100.
 
-Usage (from repo root, judge_it/):
+Usage (from repo root, vjudge/):
     python scripts/gen_bil_loadtest.py            # 100 copies + 20/50/100 ramps
 
 Then run a ramp step (START AT 1 to validate, then step up):
-    judge_it campaign clients/idfc/bil/load-test/.generated/bil-020.yaml -m 1
-    judge_it campaign clients/idfc/bil/load-test/.generated/bil-020.yaml -m 20
-    judge_it campaign clients/idfc/bil/load-test/.generated/bil-050.yaml -m 50
-    judge_it campaign clients/idfc/bil/load-test/.generated/bil-100.yaml -m 100
+    vjudge campaign clients/idfc/bil/load-test/.generated/bil-020.yaml -m 1
+    vjudge campaign clients/idfc/bil/load-test/.generated/bil-020.yaml -m 20
+    vjudge campaign clients/idfc/bil/load-test/.generated/bil-050.yaml -m 50
+    vjudge campaign clients/idfc/bil/load-test/.generated/bil-100.yaml -m 100
 
 NOTE: every run places REAL outbound Twilio calls to +918062123180. Ramp up
 deliberately (1 -> 20 -> 50 -> 100) and watch the per-call logs under logs/.
@@ -57,8 +57,8 @@ def ramp_campaign(n: int) -> str:
 # the loader dedupes scenario paths.
 #
 # START AT 1 to validate the flow end-to-end, THEN run at {n}:
-#   judge_it campaign {OUT_DIR}/bil-{n:03d}.yaml -m 1
-#   judge_it campaign {OUT_DIR}/bil-{n:03d}.yaml -m {n}
+#   vjudge campaign {OUT_DIR}/bil-{n:03d}.yaml -m 1
+#   vjudge campaign {OUT_DIR}/bil-{n:03d}.yaml -m {n}
 #
 # Every run places REAL outbound calls to +918062123180. Latency/capacity is
 # read from the per-call logs under logs/.

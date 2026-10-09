@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-from judge_it.connectors import select
+from vjudge.connectors import select
 
 
 def _f(value):
@@ -45,7 +45,7 @@ def test_override_beats_env(monkeypatch):
 
 def test_unknown_name_falls_back_and_says_so(monkeypatch, caplog):
     monkeypatch.setenv("X_BACKEND", "postgres-ish")
-    with caplog.at_level(logging.WARNING, logger="judge_it.connectors"):
+    with caplog.at_level(logging.WARNING, logger="vjudge.connectors"):
         assert select(kind="k", env_var="X_BACKEND", default="none", factories=BASIC) == "NOOP"
     assert "not a recognised" in caplog.text
     assert "none, redis" in caplog.text  # tells you what IS valid
@@ -56,7 +56,7 @@ def test_a_failing_backend_degrades_rather_than_crashing(caplog):
     def boom():
         raise ImportError("No module named 'opentelemetry'")
 
-    with caplog.at_level(logging.WARNING, logger="judge_it.connectors"):
+    with caplog.at_level(logging.WARNING, logger="vjudge.connectors"):
         got = select(kind="tracing", env_var="X_BACKEND", default="none",
                      factories={"none": _f("NOOP"), "phoenix": boom}, override="phoenix")
     assert got == "NOOP"

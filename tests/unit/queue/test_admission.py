@@ -9,7 +9,7 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeaioredis
 
-from judge_it.queue.admission import (
+from vjudge.queue.admission import (
     CONFIG_HASH,
     DEFAULTS,
     GAUGE_FLEET,

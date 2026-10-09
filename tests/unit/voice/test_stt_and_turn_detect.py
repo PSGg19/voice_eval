@@ -10,16 +10,16 @@ import asyncio
 
 import pytest
 
-from judge_it.frames import BotFinalSpeech, BotPartialSpeech, BotTurnEnded
-from judge_it.voice.frames import (
+from vjudge.frames import BotFinalSpeech, BotPartialSpeech, BotTurnEnded
+from vjudge.voice.frames import (
     CallEnded,
     InboundAudio,
     SpeakEnded,
     SpeechStarted,
     UtteranceBoundary,
 )
-from judge_it.voice.stt_processor import STTProcessor
-from judge_it.voice.turn_detect import TurnDetector
+from vjudge.voice.stt_processor import STTProcessor
+from vjudge.voice.turn_detect import TurnDetector
 
 from tests.unit.voice.test_processor import run_processor
 

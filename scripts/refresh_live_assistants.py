@@ -48,7 +48,7 @@ SELECT a.uuid::text || '|' || a.id || '|' || COUNT(acc.id) || '|' ||
 FROM assistants a
 JOIN clients c ON c.id = a.client_id
 LEFT JOIN accounts acc ON acc.assistant_id = a.id
--- Optional narrowing to the clients judge_it has scenarios for. Drop the WHERE to
+-- Optional narrowing to the clients vjudge has scenarios for. Drop the WHERE to
 -- cover the whole region.
 WHERE c.name ILIKE ANY (ARRAY[
   '%veros%','%associated credit%','%pollack%','%penn%','%resurgent%','%midland%'
@@ -104,7 +104,7 @@ def render(rows: list[str], region: str, source: str, today: str) -> str:
     out += [
         "",
         "# Hand-maintained additions the query cannot know about — an assistant in a",
-        "# region judge_it cannot reach, or one a human knows is customer-facing despite",
+        "# region vjudge cannot reach, or one a human knows is customer-facing despite",
         "# an empty account table. Same shape as above; survives a refresh.",
         "extra: []",
     ]

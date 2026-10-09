@@ -4,8 +4,8 @@ the disposition that the post-call worker writes after we have already looked.
 
 import pytest
 
-from judge_it.jobs import pipeline
-from judge_it.jobs.models import Job, JobConfig, JobResultItem, JobStatus
+from vjudge.jobs import pipeline
+from vjudge.jobs.models import Job, JobConfig, JobResultItem, JobStatus
 
 
 def _job(**kw) -> Job:
@@ -21,7 +21,7 @@ def _job(**kw) -> Job:
 def _item(**kw) -> JobResultItem:
     base = dict(
         scenario_id="S01-10ac18ab",
-        judge_it_session_id="59febbada75644c9af5c9219638e2ab6",
+        vjudge_session_id="59febbada75644c9af5c9219638e2ab6",
         source_interaction_uuid="10ac18ab-97dd-40a1-82c9-5615fec1a126",
         title="Interest waiver request triggers agent deflection",
         call_status="completed",

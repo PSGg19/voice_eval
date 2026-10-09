@@ -8,7 +8,7 @@ bots.
 The campaign loader dedupes scenario paths, so we need N distinct files per
 model (copies of the two base scenarios, with a unique `name:` per copy).
 
-Usage (from repo root, judge_it/):
+Usage (from repo root, vjudge/):
     python scripts/gen_idfc_loadtest.py            # default N=100 per model
     python scripts/gen_idfc_loadtest.py 50         # N=50 per model (100 total)
 """
@@ -64,8 +64,8 @@ def main() -> None:
 # one-by-one worker pool spreads load evenly across both bots.
 #
 # max_concurrency is capped at 50 in YAML; override on the CLI to fire more:
-#   judge_it campaign {CAMPAIGN} -m {2 * N}     # {N} Gemini + {N} Qwen all concurrent
-#   judge_it campaign {CAMPAIGN} -m {N}         # {N} in flight at a time, alternating
+#   vjudge campaign {CAMPAIGN} -m {2 * N}     # {N} Gemini + {N} Qwen all concurrent
+#   vjudge campaign {CAMPAIGN} -m {N}         # {N} in flight at a time, alternating
 #
 # Regenerate / change counts:  python scripts/gen_idfc_loadtest.py <N>
 # =============================================================================

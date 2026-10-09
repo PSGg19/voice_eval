@@ -19,9 +19,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from judge_it.db.idempotency import claim
-from judge_it.db.models import Run, RunBatch, Scenario, Target, VariableSet
-from judge_it.db.partitions import PARTITION_NAME
+from vjudge.db.idempotency import claim
+from vjudge.db.models import Run, RunBatch, Scenario, Target, VariableSet
+from vjudge.db.partitions import PARTITION_NAME
 
 NOW = datetime.now(timezone.utc)
 
@@ -48,7 +48,7 @@ def test_every_model_round_trips(migrated_engine):
         target = _mk_target(
             s,
             assistant_name="Imported - SBI YONO V2 Abhay",
-            provider_config="livekit-judge_ittl-2",
+            provider_config="livekit-vjudgetl-2",
             region="in",
             phone_number="+918062123187",
             account_count=0,
@@ -79,14 +79,14 @@ def test_every_model_round_trips(migrated_engine):
             target_id=target.id, region="in", transport="sip",
             vars_snapshot={"customer_name": "Test"},
             config_snapshot={"sip_destination_host": "inproj.sip.livekit.cloud:5060",
-                             "provider_config": "livekit-judge_ittl-2"},
+                             "provider_config": "livekit-vjudgetl-2"},
         )
         s.add(run)
         s.commit()
 
         got = s.get(Run, (run.run_uuid, run.created_at))
         assert got is not None
-        assert got.config_snapshot["provider_config"] == "livekit-judge_ittl-2"
+        assert got.config_snapshot["provider_config"] == "livekit-vjudgetl-2"
         assert got.region == "in"
 
 

@@ -15,8 +15,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from judge_it.cli.main import _print_v2_summary, cli_app
-from judge_it.core.models import (
+from vjudge.cli.main import _print_v2_summary, cli_app
+from vjudge.core.models import (
     CallResult,
     CallStatus,
     EvaluationCriterion,
@@ -52,12 +52,12 @@ def test_each_subcommand_has_help(cmd):
     assert cmd in res.stdout.lower()
 
 
-# --- judge_it lint against all reference scenarios ----------------------------
+# --- vjudge lint against all reference scenarios ----------------------------
 
 def test_lint_all_reference_scenarios():
-    """`judge_it lint` over the three canonical scenarios should at minimum
+    """`vjudge lint` over the three canonical scenarios should at minimum
     parse all three. example-barge-llm-scenario.yaml will fail with
-    missing_bcd until someone runs `judge_it bcg` — that's documented in
+    missing_bcd until someone runs `vjudge bcg` — that's documented in
     the CHECKLIST. Skip that file here by linting the two we know pass.
     """
     runner = CliRunner()
@@ -72,7 +72,7 @@ def test_lint_all_reference_scenarios():
 
 def test_example_barge_llm_scenario_fails_lint_without_bcd():
     """Documented expected behavior: the LLM-mode scenario references a BCD
-    file that doesn't exist until `judge_it bcg` is run. Lint catches this.
+    file that doesn't exist until `vjudge bcg` is run. Lint catches this.
     """
     runner = CliRunner()
     res = runner.invoke(
@@ -125,7 +125,7 @@ def _capture_print(result: CallResult) -> str:
 
     buf = io.StringIO()
     fake = _Console(file=buf, force_terminal=False, width=120)
-    with patch("judge_it.cli.main.console", fake):
+    with patch("vjudge.cli.main.console", fake):
         _print_v2_summary(result)
     return buf.getvalue()
 
@@ -247,7 +247,7 @@ def _patch_runner_returning(result: CallResult):
     from contextlib import ExitStack
     from unittest.mock import AsyncMock, MagicMock
 
-    from judge_it.core.config import Settings
+    from vjudge.core.config import Settings
 
     def _stub_settings(*a, **kw):
         return Settings(
@@ -266,18 +266,18 @@ def _patch_runner_returning(result: CallResult):
     fake_runner.run_scenario_file = AsyncMock(return_value=result)
     fake_runner.close = AsyncMock()
 
-    stack.enter_context(patch("judge_it.cli.run.resolve_settings", _stub_settings))
-    stack.enter_context(patch("judge_it.cli.run._start_server"))
-    stack.enter_context(patch("judge_it.cli.run.TestRunner", return_value=fake_runner))
+    stack.enter_context(patch("vjudge.cli.run.resolve_settings", _stub_settings))
+    stack.enter_context(patch("vjudge.cli.run._start_server"))
+    stack.enter_context(patch("vjudge.cli.run.TestRunner", return_value=fake_runner))
     return stack, fake_runner
 
 
 def test_run_v1_yaml_uses_v1_summary(tmp_path, monkeypatch):
     """Backward-compat invariant (Task 8 acceptance): V1 flow YAMLs still
-    work via `judge_it run`. Schema detection should route to _print_result
+    work via `vjudge run`. Schema detection should route to _print_result
     (V1 summary), NOT _print_v2_summary.
     """
-    from judge_it.core.models import StepResult, StepStatus
+    from vjudge.core.models import StepResult, StepStatus
 
     monkeypatch.chdir(tmp_path)
     # Minimal V1 flow YAML.
@@ -296,8 +296,8 @@ def test_run_v1_yaml_uses_v1_summary(tmp_path, monkeypatch):
     stack, _ = _patch_runner_returning(v1_result)
     runner = CliRunner()
     with stack, \
-         patch("judge_it.cli.run._print_v2_summary") as v2_print, \
-         patch("judge_it.cli.run._print_result") as v1_print:
+         patch("vjudge.cli.run._print_v2_summary") as v2_print, \
+         patch("vjudge.cli.run._print_result") as v1_print:
         res = runner.invoke(cli_app, ["run", str(v1_path)])
     assert res.exit_code == 0
     # V1 summary called, V2 summary NOT called.

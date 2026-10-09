@@ -20,8 +20,8 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from judge_it.core.rendering import render_sandboxed
-from judge_it.db.models import Run
+from vjudge.core.rendering import render_sandboxed
+from vjudge.db.models import Run
 
 from .conftest import build_api
 
@@ -358,7 +358,7 @@ def test_sip_into_unconfigured_region_refused(migrated_engine):
     assert resp.status_code == 422
     refusals = resp.json()["detail"]["refusals"]
     assert refusals[0]["error_type"] == "region_not_configured"
-    assert "JUDGE_IT_SIP_DESTINATION_HOST_IN" in refusals[0]["message"]
+    assert "VJUDGE_SIP_DESTINATION_HOST_IN" in refusals[0]["message"]
 
 
 # ------------------------------------------------------------------ batches

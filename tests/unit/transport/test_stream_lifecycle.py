@@ -21,8 +21,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from judge_it.core.models import CallResult, CallStatus, TranscriptEntry
-from judge_it.transport.stream import MediaStreamSession
+from vjudge.core.models import CallResult, CallStatus, TranscriptEntry
+from vjudge.transport.stream import MediaStreamSession
 
 
 def _make_session() -> MediaStreamSession:

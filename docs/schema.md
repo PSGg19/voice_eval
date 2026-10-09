@@ -1,7 +1,7 @@
 # Scenario Schema
 
 Condensed reference for the V2 scenario YAML. Full PRD lives in
-`plan/docs/PRD-judge_it-v2-ai-caller.md §7`.
+`plan/docs/PRD-vjudge-v2-ai-caller.md §7`.
 
 ## Required keys
 
@@ -47,7 +47,7 @@ barge_in:
 ```
 
 Mode rules are mutually exclusive — `scheduled` rejects `decide_every_ms`
-and `bot_context_path`; `llm` rejects `triggers`. `judge_it lint` enforces
+and `bot_context_path`; `llm` rejects `triggers`. `vjudge lint` enforces
 this at load time.
 
 (Fuller schema reference with examples lands in a follow-up — this file
