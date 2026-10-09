@@ -8,10 +8,12 @@ from vjudge.artifacts import LocalArtifactStore, build_store
 
 def test_local_round_trip(tmp_path):
     store = LocalArtifactStore(root=str(tmp_path))
-    key = store.put_bytes("runs/r1/transcript.json", b'{"x":1}')
-    assert key == "runs/r1/transcript.json"          # key is the identity
-    assert store.get_bytes(key) == b'{"x":1}'
-    assert (tmp_path / "runs" / "r1" / "transcript.json").exists()
+    payload = b'{"x":1}'
+    rel_path = "runs/r1/transcript.json"
+    key = store.put_bytes(rel_path, payload)
+    assert key == rel_path
+    assert store.get_bytes(key) == payload
+    assert (tmp_path / rel_path).exists()
 
 
 @pytest.mark.parametrize("bad", ["/abs/path", "../escape", "a\\b", ""])
